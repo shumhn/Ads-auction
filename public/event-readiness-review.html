@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ClaimSpot event readiness review</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #111;
+        --muted: #656565;
+        --line: #d9d9d2;
+        --paper: #f5f5f0;
+        --lime: #eaff58;
+        --red: #ffe1dd;
+        --green: #dff7df;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          15px/1.55 Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          'Segoe UI',
+          sans-serif;
+      }
+      main {
+        width: min(1120px, calc(100% - 32px));
+        margin: 32px auto 80px;
+      }
+      header {
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        padding: 40px;
+        background: #fff;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.07);
+      }
+      .eyebrow {
+        margin: 0 0 10px;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1 {
+        margin: 0;
+        max-width: 900px;
+        font-size: clamp(42px, 7vw, 82px);
+        line-height: 0.95;
+        letter-spacing: -0.065em;
+      }
+      .verdict {
+        display: inline-flex;
+        margin-top: 28px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: var(--lime);
+        font-weight: 850;
+      }
+      .lede {
+        max-width: 800px;
+        margin: 22px 0 0;
+        font-size: 19px;
+        color: #444;
+      }
+      section {
+        margin-top: 26px;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        padding: 30px;
+        background: #fff;
+      }
+      h2 {
+        margin: 0 0 18px;
+        font-size: 28px;
+        letter-spacing: -0.035em;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 14px 12px;
+        border-top: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .yes,
+      .partial,
+      .no {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .yes {
+        background: var(--green);
+      }
+      .partial {
+        background: #fff0bd;
+      }
+      .no {
+        background: var(--red);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 14px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 18px;
+        background: #fafaf7;
+      }
+      .card b {
+        display: block;
+        margin-bottom: 5px;
+      }
+      ol {
+        margin: 0;
+        padding-left: 22px;
+      }
+      li + li {
+        margin-top: 10px;
+      }
+      code {
+        padding: 2px 5px;
+        border-radius: 5px;
+        background: #efefeb;
+      }
+      a {
+        color: inherit;
+        text-decoration-thickness: 1.5px;
+        text-underline-offset: 3px;
+      }
+      @media (max-width: 780px) {
+        header,
+        section {
+          padding: 22px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        table {
+          display: block;
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">ClaimSpot · event readiness · 9 Sep 2026</p>
+        <h1>Real auction rails. Not yet a complete event product.</h1>
+        <span class="verdict">Protocol E2E: yes · attendee E2E: no</span>
+        <p class="lede">
+          The deployed devnet program proves funded bids, MagicBlock execution, settlement and refunds. The missing work
+          is the operational product around those rails: campaign creation, artwork, moderation, event settlement
+          controls, delivery and public proof.
+        </p>
+      </header>
+
+      <section>
+        <h2>Solana Nepal auction vs ClaimSpot today</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Capability</th>
+              <th>Solana + mallow</th>
+              <th>ClaimSpot today</th>
+              <th>Readiness</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Inventory</td>
+              <td>One Solana PFP split into 9 named zones</td>
+              <td>9 pre-seeded MacBook zones</td>
+              <td><span class="partial">Partial</span></td>
+            </tr>
+            <tr>
+              <td>Auction/display time</td>
+              <td>24-hour bidding; one-week PFP + pinned-post placement</td>
+              <td>Configurable auction hours; delivery duration exists only as UI copy</td>
+              <td><span class="partial">Partial</span></td>
+            </tr>
+            <tr>
+              <td>Money</td>
+              <td>USDC escrow; outbid bids returned promptly; 100% routed to relief</td>
+              <td>Custom devnet mint; maximum budgets remain locked until final settlement; winner paid to creator</td>
+              <td><span class="partial">Partial</span></td>
+            </tr>
+            <tr>
+              <td>Live bidding</td>
+              <td>Highest bid wins; independent 2-minute soft close per zone</td>
+              <td>Highest bid wins on MagicBlock ER; 30-second extension</td>
+              <td><span class="yes">Real</span></td>
+            </tr>
+            <tr>
+              <td>Artwork</td>
+              <td>Required with every bid; ownership and content rules</td>
+              <td>No upload, content address, approval or replacement workflow</td>
+              <td><span class="no">Missing</span></td>
+            </tr>
+            <tr>
+              <td>Fulfilment</td>
+              <td>Final composite published to official X PFP and pinned post for a week</td>
+              <td>Promised in copy; no composite, handoff, scheduling or proof state</td>
+              <td><span class="no">Missing</span></td>
+            </tr>
+            <tr>
+              <td>Completion UI</td>
+              <td>Results/history and delivered-funds links</td>
+              <td>Close, undelegate, finalize and refund work only through scripts</td>
+              <td><span class="no">Missing</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>What is genuinely working</h2>
+        <div class="grid">
+          <div class="card">
+            <b>Base-layer custody</b>Bidder SPL tokens move into a program-owned vault before a live bid is accepted.
+          </div>
+          <div class="card">
+            <b>MagicBlock hot loop</b>Shared auction state and per-bidder budget state are delegated; bids execute
+            through the hosted ER router.
+          </div>
+          <div class="card">
+            <b>Canonical settlement</b>The result returns to Solana, creator payout and excess return happen, and a
+            public receipt is written.
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>P0: make one event work, not a whole marketplace</h2>
+        <ol>
+          <li>
+            Create one operator-owned campaign with 9 zones, a beneficiary wallet, campaign terms URI, artwork rules,
+            auction start/end and one-week display commitment.
+          </li>
+          <li>
+            Make artwork + brand identity mandatory with the bid; add moderator approve/reject and a replacement
+            deadline.
+          </li>
+          <li>
+            Change outbid economics so losing capital is promptly reusable/refundable instead of locked until the entire
+            event settles.
+          </li>
+          <li>
+            Add operator controls for soft-close, close/commit, finalize/donate, refunds, retries and no-bid
+            cancellation.
+          </li>
+          <li>
+            Generate the final 9-zone composite, publish a delivery-proof record, and show payout/refund/donation links
+            on a public results page.
+          </li>
+          <li>
+            Use real devnet USDC or a clearly labeled event token faucet, then rehearse with 10+ wallets under
+            end-of-auction load.
+          </li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Recommended event story</h2>
+        <p>
+          <b>“Auction your attention for impact.”</b> A creator or community turns one visible surface into nine
+          sponsorship zones. Brands bid live in stablecoins. MagicBlock keeps the last-minute auction responsive. The
+          winning artwork is composed and published for a promised period. Funds route transparently to the declared
+          recipient, and every winner, refund, placement and payout has public proof.
+        </p>
+        <p>
+          This is a stronger launch wedge than opening a generic marketplace on day one. Prove one spectacular event,
+          then turn the event tooling into a reusable creator product.
+        </p>
+      </section>
+
+      <section>
+        <h2>Sources</h2>
+        <p>
+          <a href="https://nepal.mallow.art/">Official Solana Nepal Relief auction page and terms</a> ·
+          <a
+            href="https://solanacompass.com/news/solana-sells-nine-logo-zones-for-nepal-flood-relief-raising-166k-in-usdc"
+            >Solana Compass recap</a
+          >
+          ·
+          <a href="https://coinedition.com/solana-auctions-9-ad-spaces-on-its-logo-for-nepal-flood-relief/"
+            >Coin Edition mechanics summary</a
+          >
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
