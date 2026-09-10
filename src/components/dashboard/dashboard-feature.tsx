@@ -353,6 +353,131 @@ function StorySection() {
   )
 }
 
+function MagicBlockSection() {
+  const flow = [
+    {
+      number: '01',
+      label: 'BASE LAYER',
+      title: 'Set the rules on Solana.',
+      copy: 'Campaigns, placements, USDC escrow, and the auction lifecycle start on Solana—the durable source of truth.',
+      icon: ShieldCheck,
+    },
+    {
+      number: '02',
+      label: 'HOT PATH',
+      title: 'Move the live loop to MagicBlock.',
+      copy: 'The live auction and each bidder’s escrow delegate to a MagicBlock Ephemeral Rollup for fast, concurrent bids.',
+      icon: Zap,
+    },
+    {
+      number: '03',
+      label: 'SETTLEMENT',
+      title: 'Commit the result back.',
+      copy: 'When bidding closes, the winner, refunds, payout, and proof return to Solana for a public, verifiable receipt.',
+      icon: BadgeCheck,
+    },
+  ]
+
+  return (
+    <section
+      id="magicblock"
+      className="solana-hero-surface scroll-mt-20 border-y border-foreground/10 px-4 py-16 sm:px-6 lg:px-8 lg:py-24"
+    >
+      <div className="mx-auto max-w-7xl">
+        <div className="grid gap-10 lg:grid-cols-[.8fr_1.2fr] lg:items-end lg:gap-20">
+          <div>
+            <div className="flex flex-wrap items-center gap-4">
+              <p className="font-mono text-xs font-medium uppercase tracking-[0.14em] text-ink-muted">
+                Built for live bidding
+              </p>
+              <span className="h-px w-10 bg-foreground/20" aria-hidden="true" />
+              <span className="font-mono text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-400">
+                MagicBlock ER
+              </span>
+            </div>
+            <h2 className="mt-5 max-w-xl text-[clamp(2.35rem,4.5vw,4rem)] font-bold leading-[0.98] tracking-[-0.05em]">
+              MagicBlock takes the hot path.
+            </h2>
+            <p className="mt-6 max-w-xl text-base leading-7 text-ink-muted sm:text-lg sm:leading-8">
+              Live auctions need the same bid, timer, count, and escrow state to update together. Atrium.ads delegates
+              only that fast-changing loop to MagicBlock—Solana still keeps the receipts.
+            </p>
+            <a
+              href="https://docs.magicblock.gg/"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-7 inline-flex min-h-10 items-center gap-2 rounded-md text-sm font-bold underline decoration-foreground/25 underline-offset-4 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-foreground/20"
+            >
+              Explore MagicBlock <ExternalLink className="size-4" aria-hidden="true" />
+            </a>
+          </div>
+
+          <div className="solana-panel rounded-3xl border border-foreground/15 p-5 sm:p-7">
+            <div className="flex items-center justify-between gap-4 border-b border-foreground/10 pb-5">
+              <MagicBlockLogo />
+              <span className="font-mono inline-flex items-center gap-2 rounded-full border border-foreground/12 bg-background/70 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-ink-muted">
+                <span className="size-1.5 rounded-full bg-emerald-500" />
+                Auction path
+              </span>
+            </div>
+
+            <div className="divide-y divide-foreground/10">
+              {flow.map((step, index) => {
+                const Icon = step.icon
+                return (
+                  <div key={step.number} className="relative grid gap-4 py-6 sm:grid-cols-[auto_1fr] sm:gap-5">
+                    <div className="flex items-start gap-3 sm:block">
+                      <span className="font-mono text-xs font-bold text-ink-muted">{step.number}</span>
+                      <Icon className="size-5 sm:mt-5" aria-hidden="true" />
+                    </div>
+                    <div>
+                      <p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted">
+                        {step.label}
+                      </p>
+                      <h3 className="mt-2 text-xl font-bold tracking-[-0.035em]">{step.title}</h3>
+                      <p className="mt-2 max-w-xl text-sm leading-6 text-ink-muted">{step.copy}</p>
+                    </div>
+                    {index < flow.length - 1 ? (
+                      <ArrowRight
+                        className="absolute -bottom-2.5 right-0 hidden size-5 bg-surface-soft px-0.5 text-foreground/35 sm:block"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-foreground/15 bg-foreground/10 sm:grid-cols-3">
+          <div className="bg-background/75 p-5 sm:p-6">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted">Fast</p>
+            <p className="mt-2 text-lg font-bold tracking-[-0.03em]">Bids feel live.</p>
+            <p className="mt-1 text-sm leading-6 text-ink-muted">
+              ER handles concurrent writes without making bidders wait.
+            </p>
+          </div>
+          <div className="bg-background/75 p-5 sm:p-6">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted">Sessioned</p>
+            <p className="mt-2 text-lg font-bold tracking-[-0.03em]">One approval starts a bidding burst.</p>
+            <p className="mt-1 text-sm leading-6 text-ink-muted">
+              A bidder can compete without approving every single bid.
+            </p>
+          </div>
+          <div className="bg-background/75 p-5 sm:p-6">
+            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.14em] text-ink-muted">Auditable</p>
+            <p className="mt-2 text-lg font-bold tracking-[-0.03em]">Solana holds the outcome.</p>
+            <p className="mt-1 text-sm leading-6 text-ink-muted">
+              Winner, refunds, payout, and fulfilment proof stay inspectable.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 function ProofSection() {
   return (
     <section className="solana-section-wash border-t border-foreground/10 px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
@@ -547,6 +672,7 @@ export function DashboardFeature() {
 
       <MarketProofSection />
       <StorySection />
+      <MagicBlockSection />
       <CampaignMarketplace />
       <ProofSection />
     </div>
