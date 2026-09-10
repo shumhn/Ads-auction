@@ -1,0 +1,14 @@
+# Add files here to ignore them from prettier formatting
+/anchor/target
+/anchor/target/test-ledger
+/anchor/target/.rustc_info.json
+/dist
+/coverage
+.next
+/tmp
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+.agents
+agent
+pnpm-workspace.yaml
