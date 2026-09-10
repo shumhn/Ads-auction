@@ -141,12 +141,16 @@ export function MachineBoard({
                 </>
               ) : view === 'result' && hasBid && winner ? (
                 <>
-                  <span className="font-mono text-[8px] font-black uppercase tracking-[0.08em] sm:text-[10px]">Leader</span>
+                  <span className="font-mono text-[8px] font-black uppercase tracking-[0.08em] sm:text-[10px]">
+                    Leader
+                  </span>
                   <span className="mt-0.5 font-mono text-[8px] sm:text-xs">{shortAddress(winner)}</span>
                 </>
               ) : (
                 <>
-                  <span className="font-mono text-[8px] font-black uppercase tracking-[0.08em] sm:text-[10px]">#{spot.id}</span>
+                  <span className="font-mono text-[8px] font-black uppercase tracking-[0.08em] sm:text-[10px]">
+                    #{spot.id}
+                  </span>
                   <span className="mt-0.5 text-[8px] font-semibold leading-none sm:text-[11px]">
                     {value === null ? 'Not live' : `${formatUsdc(value)} USDC`}
                   </span>
@@ -665,7 +669,9 @@ export function LiveAuction() {
             <div id="featured-lots" className="mt-16 scroll-mt-24">
               <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
                 <div>
-                  <p className="font-mono text-xs font-black uppercase tracking-[0.14em] text-neutral-500">On-chain inventory</p>
+                  <p className="font-mono text-xs font-black uppercase tracking-[0.14em] text-neutral-500">
+                    On-chain inventory
+                  </p>
                   <h3 className="mt-2 text-3xl font-black tracking-[-0.05em]">All 22 lots</h3>
                 </div>
                 <p className="max-w-lg text-sm leading-6 text-neutral-600">
@@ -740,7 +746,9 @@ export function LiveAuction() {
         <div id="how-it-works" className="mt-20 scroll-mt-24 border-t border-black/10 pt-14">
           <div className="grid gap-8 lg:grid-cols-[.8fr_1.2fr]">
             <div>
-              <p className="font-mono text-xs font-black uppercase tracking-[0.14em] text-neutral-500">Why MagicBlock is here</p>
+              <p className="font-mono text-xs font-black uppercase tracking-[0.14em] text-neutral-500">
+                Why MagicBlock is here
+              </p>
               <h3 className="mt-3 text-3xl font-black tracking-[-0.05em]">
                 Money stays on Solana. Bidding moves at live-event speed.
               </h3>

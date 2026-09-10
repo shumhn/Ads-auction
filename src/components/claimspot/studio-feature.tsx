@@ -805,7 +805,10 @@ export function StudioFeature() {
                   })}
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
-                  <label htmlFor="custom-lot-count" className="font-mono grid gap-2 text-xs font-black uppercase tracking-wide">
+                  <label
+                    htmlFor="custom-lot-count"
+                    className="font-mono grid gap-2 text-xs font-black uppercase tracking-wide"
+                  >
                     Custom grid · 1–{MAX_LOTS}
                     <Input
                       id="custom-lot-count"

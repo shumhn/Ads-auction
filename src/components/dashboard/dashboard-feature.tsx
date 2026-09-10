@@ -147,17 +147,25 @@ function StorySection() {
               <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-background/60">For brands</span>
               <span className="mt-2 block text-2xl font-bold tracking-[-0.04em]">I want a laptop spot</span>
             </span>
-            <ArrowDown className="size-6 shrink-0 transition-transform duration-150 group-hover:translate-y-1 motion-reduce:transition-none" aria-hidden="true" />
+            <ArrowDown
+              className="size-6 shrink-0 transition-transform duration-150 group-hover:translate-y-1 motion-reduce:transition-none"
+              aria-hidden="true"
+            />
           </a>
           <Link
             href="/studio"
             className="group flex min-h-32 items-end justify-between gap-6 rounded-2xl border border-foreground/15 bg-surface-soft p-6 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-foreground/20"
           >
             <span>
-              <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-muted">For surface owners</span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-ink-muted">
+                For surface owners
+              </span>
               <span className="mt-2 block text-2xl font-bold tracking-[-0.04em]">I have a surface to auction</span>
             </span>
-            <ArrowRight className="size-6 shrink-0 transition-transform duration-150 group-hover:translate-x-1 motion-reduce:transition-none" aria-hidden="true" />
+            <ArrowRight
+              className="size-6 shrink-0 transition-transform duration-150 group-hover:translate-x-1 motion-reduce:transition-none"
+              aria-hidden="true"
+            />
           </Link>
         </div>
       </div>
@@ -209,7 +217,9 @@ function ProofSection() {
             <ShieldCheck className="size-5" aria-hidden="true" />
             <div>
               <h3 className="font-bold">Budgets and outcomes return to Solana</h3>
-              <p className="mt-1 text-sm leading-6 text-ink-muted">Escrow, winner, refunds, and payout stay auditable.</p>
+              <p className="mt-1 text-sm leading-6 text-ink-muted">
+                Escrow, winner, refunds, and payout stay auditable.
+              </p>
             </div>
             <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-muted">On-chain settlement</span>
           </div>
@@ -217,7 +227,9 @@ function ProofSection() {
             <Sparkles className="size-5" aria-hidden="true" />
             <div>
               <h3 className="font-bold">Proof comes before creator payout</h3>
-              <p className="mt-1 text-sm leading-6 text-ink-muted">The winning placement must be delivered and accepted.</p>
+              <p className="mt-1 text-sm leading-6 text-ink-muted">
+                The winning placement must be delivered and accepted.
+              </p>
             </div>
             <span className="font-mono text-[11px] uppercase tracking-[0.1em] text-ink-muted">Proof-gated release</span>
           </div>

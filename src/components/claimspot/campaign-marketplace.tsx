@@ -130,8 +130,8 @@ export function CampaignMarketplace() {
               Pick a laptop. Choose your spot.
             </h2>
             <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-600">
-              This is the working product. Open a live drop to see its physical surface map, select one placement,
-              lock test USDC, and bid.
+              This is the working product. Open a live drop to see its physical surface map, select one placement, lock
+              test USDC, and bid.
             </p>
           </div>
           <div className="font-mono flex items-center gap-2 text-xs font-medium uppercase tracking-[0.06em] text-neutral-600">

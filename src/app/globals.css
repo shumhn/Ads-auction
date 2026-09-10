@@ -53,8 +53,8 @@
     var(--font-manrope), -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', ui-sans-serif, system-ui,
     sans-serif;
   --font-display-stack:
-    var(--font-manrope), -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', ui-sans-serif,
-    system-ui, sans-serif;
+    var(--font-manrope), -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue',
+    ui-sans-serif, system-ui, sans-serif;
   --font-mono-stack: var(--font-dm-mono), 'SFMono-Regular', 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
   --radius: 0.5rem;
   --background: oklch(0.985 0.006 92);
