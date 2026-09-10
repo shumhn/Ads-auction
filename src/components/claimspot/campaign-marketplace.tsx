@@ -111,14 +111,15 @@ export function CampaignMarketplace() {
       })
   }, [liveStream.auctions, marketplaceQuery.data, now])
 
-  const openCampaigns = campaignCards.filter((campaign) => campaign.open > 0).length
-  const openLots = campaignCards.reduce((sum, campaign) => sum + campaign.open, 0)
-  const totalBids = campaignCards.reduce((sum, campaign) => sum + campaign.bids, 0n)
+  const liveCampaignCards = campaignCards.filter((campaign) => campaign.open > 0)
+  const openCampaigns = liveCampaignCards.length
+  const openLots = liveCampaignCards.reduce((sum, campaign) => sum + campaign.open, 0)
+  const totalBids = liveCampaignCards.reduce((sum, campaign) => sum + campaign.bids, 0n)
 
   return (
     <section
       id="live"
-      className="scroll-mt-20 border-b border-black/10 bg-[#f4f4ef] px-4 py-14 sm:px-6 lg:px-8 lg:py-20"
+      className="solana-section-wash scroll-mt-20 border-b border-black/10 px-4 py-14 sm:px-6 lg:px-8 lg:py-20"
     >
       <div className="mx-auto max-w-7xl">
         <div className="grid gap-7 lg:grid-cols-[1fr_auto] lg:items-end">
@@ -127,7 +128,7 @@ export function CampaignMarketplace() {
               <Radio className="size-4" aria-hidden="true" /> Live auction board
             </p>
             <h2 className="mt-4 max-w-4xl text-[clamp(2.5rem,5vw,5rem)] font-black leading-[0.92] tracking-[-0.065em]">
-              Pick a laptop. Choose your spot.
+              Pick a MacBook. Choose your spot.
             </h2>
             <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-600">
               This is the working product. Open a live drop to see its physical surface map, select one placement, lock
@@ -191,7 +192,7 @@ export function CampaignMarketplace() {
                 <RefreshCw className="size-4" aria-hidden="true" /> Retry
               </Button>
             </div>
-          ) : campaignCards.length === 0 ? (
+          ) : liveCampaignCards.length === 0 ? (
             <div className="rounded-xl border border-dashed border-black/20 bg-white p-8 text-center">
               <h3 className="text-2xl font-black tracking-[-0.04em]">No live auction is open yet</h3>
               <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-neutral-600">
@@ -203,14 +204,14 @@ export function CampaignMarketplace() {
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {campaignCards.map((card) => {
+              {liveCampaignCards.map((card) => {
                 const isOpen = card.open > 0
                 const title = card.copy?.title ?? `Campaign ${shortAddress(card.address)}`
                 const surface = card.copy?.surface
                 return (
                   <article
                     key={card.address}
-                    className="group flex min-h-96 flex-col rounded-xl border border-black/15 bg-white p-5 transition-transform duration-150 hover:-translate-y-0.5 hover:shadow-[0_20px_55px_-35px_rgba(0,0,0,.55)] motion-reduce:transition-none"
+                    className="solana-panel group flex min-h-96 flex-col rounded-xl border border-black/15 p-5 transition-transform duration-150 hover:-translate-y-0.5 hover:shadow-[0_20px_55px_-35px_rgba(0,0,0,.55)] motion-reduce:transition-none"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <span
@@ -222,7 +223,7 @@ export function CampaignMarketplace() {
                         {isOpen ? 'Live now' : 'Awaiting close'}
                       </span>
                       <span className="text-xs font-bold text-neutral-500">
-                        {card.lots} {card.lots === 1 ? 'spot' : 'spots'}
+                        {card.open} {card.open === 1 ? 'spot' : 'spots'} open
                       </span>
                     </div>
 
@@ -232,7 +233,7 @@ export function CampaignMarketplace() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           src={`/api/uploads/${surface.imageHash}`}
-                          alt={`${title} laptop surface`}
+                          alt={`${title} MacBook surface`}
                           className="size-full object-cover"
                         />
                       ) : (

@@ -119,9 +119,10 @@ export async function POST(request: Request) {
     const rpc = process.env.NEXT_PUBLIC_MAGIC_BASE_RPC ?? 'https://rpc.magicblock.app/devnet'
     const connection = new Connection(rpc, 'confirmed')
     const accounts = await connection.getMultipleAccountsInfo([campaignKey, ...lotKeys])
-    if (!accounts[0]?.owner.equals(CLAIMSPOT_PROGRAM_ID)) throw new Error('Campaign is not a ClaimSpot devnet account')
+    if (!accounts[0]?.owner.equals(CLAIMSPOT_PROGRAM_ID))
+      throw new Error('Campaign is not an Atrium.ads devnet account')
     if (accounts.slice(1).some((account) => !account?.owner.equals(CLAIMSPOT_PROGRAM_ID))) {
-      throw new Error('One or more lots are not ClaimSpot devnet auctions')
+      throw new Error('One or more lots are not Atrium.ads devnet auctions')
     }
 
     const campaigns = await readJson<Record<string, CampaignMetadata>>('campaigns.json', {})

@@ -7,7 +7,7 @@ export const CLAIMSPOT_NETWORK = {
 } as const
 
 /**
- * ClaimSpot keeps listing creation, escrow and final settlement on Solana.
+ * Atrium.ads keeps listing creation, escrow and final settlement on Solana.
  * Only the frequently-mutated AuctionSpot PDA is delegated. The router inspects
  * writable accounts and sends delegated writes to the correct ER automatically.
  */

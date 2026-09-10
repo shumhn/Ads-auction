@@ -10,7 +10,7 @@ export { AdsAuction, AdsAuctionIDL }
 // The programId is imported from the program IDL.
 export const ADS_AUCTION_PROGRAM_ID = new PublicKey(AdsAuctionIDL.address)
 
-// Create a typed client for the ClaimSpot Anchor program.
+// Create a typed client for the Atrium.ads Anchor program.
 export function getAdsAuctionProgram(provider: AnchorProvider, address?: PublicKey): Program<AdsAuction> {
   return new Program(
     { ...AdsAuctionIDL, address: address ? address.toBase58() : AdsAuctionIDL.address } as AdsAuction,
@@ -18,7 +18,7 @@ export function getAdsAuctionProgram(provider: AnchorProvider, address?: PublicK
   )
 }
 
-// Resolve the deployed ClaimSpot program ID for the selected cluster.
+// Resolve the deployed Atrium.ads program ID for the selected cluster.
 export function getAdsAuctionProgramId(cluster: Cluster) {
   switch (cluster) {
     case 'devnet':

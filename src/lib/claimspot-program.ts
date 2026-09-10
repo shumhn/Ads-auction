@@ -331,7 +331,7 @@ export function useClaimSpotProgram() {
   }, [wallet.publicKey])
 
   const requireMint = useCallback(() => {
-    if (!CLAIMSPOT_PAYMENT_MINT) throw new Error('ClaimSpot devnet payment mint is not configured')
+    if (!CLAIMSPOT_PAYMENT_MINT) throw new Error('Atrium.ads devnet payment mint is not configured')
     return CLAIMSPOT_PAYMENT_MINT
   }, [])
 

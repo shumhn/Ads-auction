@@ -168,7 +168,7 @@ export function StudioFeature() {
   const [moderator, setModerator] = useState('')
   const [durationValue, setDurationValue] = useState('7')
   const [durationUnit, setDurationUnit] = useState<DurationUnit>('days')
-  const [laptopModel, setLaptopModel] = useState('Generic laptop')
+  const [laptopModel, setLaptopModel] = useState('MacBook Pro')
   const [laptopFinish, setLaptopFinish] = useState('Silver')
   const [fulfillmentMode, setFulfillmentMode] = useState<LaptopFulfillmentMode>('sticker')
   const [surfaceSource, setSurfaceSource] = useState<SurfaceSource>('template')
@@ -345,7 +345,7 @@ export function StudioFeature() {
     setModerator(draft.moderator === walletAddress ? '' : draft.moderator)
     setDurationValue(duration.value)
     setDurationUnit(duration.unit)
-    setLaptopModel(copy.surface?.model ?? 'Generic laptop')
+    setLaptopModel(copy.surface?.model ?? 'MacBook Pro')
     setLaptopFinish(copy.surface?.finish ?? 'Silver')
     setFulfillmentMode(copy.surface?.fulfillmentMode ?? 'sticker')
     setSurfaceSource(source)
@@ -397,7 +397,7 @@ export function StudioFeature() {
     setModerator(campaign.moderator.equals(campaign.creator) ? '' : campaign.moderator.toBase58())
     setDurationValue(duration.value)
     setDurationUnit(duration.unit)
-    setLaptopModel('Generic laptop')
+    setLaptopModel('MacBook Pro')
     setLaptopFinish('Silver')
     setFulfillmentMode('sticker')
     setSurfaceSource('template')
@@ -434,7 +434,7 @@ export function StudioFeature() {
     if (!program.wallet.publicKey) return toast.error('Connect a devnet wallet first')
     if (!title.trim() || !details.trim()) return toast.error('Campaign title and delivery promise are required')
     if (surfaceSource === 'photo' && !surfaceFile && !surfaceImageHash)
-      return toast.error('Choose a laptop photo or use our template')
+      return toast.error('Choose a MacBook photo or use our template')
     if (lots.some((lot) => !lot.name.trim() || !lot.placement.trim()))
       return toast.error('Every lot needs a name and placement')
     const durationAmount = Number(durationValue)
@@ -458,12 +458,12 @@ export function StudioFeature() {
         )
       }
 
-      setBuilderStep(surfaceSource === 'photo' ? 'Storing the laptop photo' : 'Preparing the laptop template')
+      setBuilderStep(surfaceSource === 'photo' ? 'Storing the MacBook photo' : 'Preparing the MacBook template')
       const uploadedSurface = surfaceSource === 'photo' && surfaceFile ? await uploadImage(surfaceFile) : null
       const imageHash = uploadedSurface?.hash ?? surfaceImageHash
       const surface = {
         kind: 'macbook' as const,
-        model: surfaceSource === 'template' ? 'Generic laptop' : laptopModel.trim() || 'Creator laptop',
+        model: surfaceSource === 'template' ? 'MacBook Pro' : laptopModel.trim() || 'Creator MacBook',
         finish: surfaceSource === 'template' ? 'Silver' : laptopFinish.trim() || 'As pictured',
         fulfillmentMode,
         source: surfaceSource,
@@ -611,7 +611,7 @@ export function StudioFeature() {
       setTitle('')
       setDetails('')
       setSurfaceSource('template')
-      setLaptopModel('Generic laptop')
+      setLaptopModel('MacBook Pro')
       setLaptopFinish('Silver')
       setFulfillmentMode('sticker')
       setSurfaceFile(null)
@@ -713,8 +713,8 @@ export function StudioFeature() {
               Create it. Auction it. Prove it.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-neutral-650">
-              Every campaign, lot, review and fulfillment decision below is a real ClaimSpot program account. Artwork
-              bytes are content-addressed; their SHA-256 hashes are committed on-chain.
+              Every campaign, lot, review and fulfillment decision below is a real Atrium.ads auction program account.
+              Artwork bytes are content-addressed; their SHA-256 hashes are committed on-chain.
             </p>
           </div>
           {!walletAddress && <WalletButton />}
@@ -732,7 +732,7 @@ export function StudioFeature() {
                     </p>
                     <p className="mt-1 text-amber-800">
                       {legacyRecovery
-                        ? 'Existing lots and prices came from devnet. Re-enter the exact original title, winner promise and laptop setup so their on-chain hashes can be verified.'
+                        ? 'Existing lots and prices came from devnet. Re-enter the exact original title, winner promise and MacBook setup so their on-chain hashes can be verified.'
                         : 'Completed devnet lots will be reused; only unfinished steps will run.'}
                     </p>
                   </div>
@@ -887,15 +887,15 @@ export function StudioFeature() {
 
               <div className="grid gap-4 md:grid-cols-2">
                 <fieldset className="grid gap-3 md:col-span-2">
-                  <legend className="text-sm font-bold">Choose your laptop</legend>
-                  <p className="text-sm text-neutral-600">Start with our template, or show buyers your own laptop.</p>
+                  <legend className="text-sm font-bold">Choose your MacBook</legend>
+                  <p className="text-sm text-neutral-600">Start with our template, or show buyers your own MacBook.</p>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <button
                       type="button"
                       aria-pressed={surfaceSource === 'template'}
                       onClick={() => {
                         setSurfaceSource('template')
-                        setLaptopModel('Generic laptop')
+                        setLaptopModel('MacBook Pro')
                         setLaptopFinish('Silver')
                         setSurfaceFile(null)
                         setSurfaceImageHash(null)
@@ -927,7 +927,7 @@ export function StudioFeature() {
                       aria-pressed={surfaceSource === 'photo'}
                       onClick={() => {
                         setSurfaceSource('photo')
-                        if (laptopModel === 'Generic laptop') setLaptopModel('Creator laptop')
+                        if (laptopModel === 'MacBook Pro') setLaptopModel('Creator MacBook')
                         if (laptopFinish === 'Silver') setLaptopFinish('As pictured')
                       }}
                       className={`flex min-h-24 items-center gap-4 rounded-2xl border p-4 text-left transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/20 ${
@@ -956,7 +956,7 @@ export function StudioFeature() {
                       className="grid gap-2 rounded-2xl border border-black/10 bg-[#fafaf7] p-4 text-sm font-bold"
                       htmlFor="laptop-photo"
                     >
-                      Laptop photo
+                      MacBook photo
                       <Input
                         id="laptop-photo"
                         type="file"
@@ -978,12 +978,12 @@ export function StudioFeature() {
                 {surfaceSource === 'photo' && (
                   <>
                     <label className="grid gap-2 text-sm font-bold">
-                      Laptop model <span className="font-normal text-neutral-500">optional</span>
+                      MacBook model <span className="font-normal text-neutral-500">optional</span>
                       <Input
                         value={laptopModel}
                         maxLength={120}
                         onChange={(event) => setLaptopModel(event.target.value)}
-                        placeholder="Creator laptop"
+                        placeholder="MacBook Pro 16-inch"
                       />
                     </label>
                     <label className="grid gap-2 text-sm font-bold">
@@ -1235,7 +1235,7 @@ export function StudioFeature() {
                               <p className="mt-2 max-w-md text-xs leading-5 text-amber-700">
                                 {copy?.draft
                                   ? 'Recovery checkpoint saved. Resume restores the exact setup and reuses every completed devnet lot.'
-                                  : 'Legacy draft: existing lots can be recovered from devnet, but you must re-enter the exact original title, winner promise and laptop setup.'}
+                                  : 'Legacy draft: existing lots can be recovered from devnet, but you must re-enter the exact original title, winner promise and MacBook setup.'}
                               </p>
                             )}
                           </div>

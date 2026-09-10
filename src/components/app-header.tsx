@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Menu, X } from 'lucide-react'
+import Image from 'next/image'
 import { WalletButton } from '@/components/solana/solana-provider'
 
 export function AppHeader({ links = [] }: { links: { label: string; path: string }[] }) {
@@ -18,11 +19,15 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
     <header className="sticky top-0 z-50 border-b border-foreground/10 bg-background/90 px-4 py-3 text-foreground backdrop-blur-xl sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-6">
         <div className="flex min-w-0 items-center gap-8">
-          <Link className="flex shrink-0 items-center gap-2 text-[15px] font-black tracking-[-0.04em]" href="/">
-            <span className="grid size-6 place-items-center rounded-[5px] bg-foreground text-[9px] font-black tracking-[-0.08em] text-background">
-              CS
-            </span>
-            <span>ClaimSpot</span>
+          <Link className="flex shrink-0 items-center gap-2.5 text-[15px] font-bold tracking-[-0.035em]" href="/">
+            <Image
+              src="/atrium-logo.jpg"
+              alt="Atrium.ads logo"
+              width={28}
+              height={28}
+              className="size-7 rounded-md object-cover shadow-xs ring-1 ring-foreground/15 transition-transform duration-150 hover:scale-105"
+            />
+            <span className="font-bold tracking-tight text-foreground">Atrium.ads</span>
           </Link>
           <nav className="hidden lg:block" aria-label="Main navigation">
             <ul className="flex items-center gap-1">
@@ -38,7 +43,7 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
               ))}
               <li>
                 <span className="ml-2 inline-flex min-h-8 items-center rounded-full border border-foreground/10 bg-foreground/[0.035] px-3 text-[10px] font-bold uppercase tracking-[0.12em] text-ink-muted">
-                  Marketplace soon
+                  Any-space auctions
                 </span>
               </li>
             </ul>
@@ -82,7 +87,7 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
                   </li>
                 ))}
                 <li className="mt-2 border-t border-foreground/10 pt-4 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted">
-                  Marketplace coming soon
+                  Any-space auction marketplace
                 </li>
               </ul>
               <div className="flex flex-col gap-4">

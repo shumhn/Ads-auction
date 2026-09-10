@@ -149,7 +149,7 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
     )
   }
   if (!chainQuery.data?.campaign) {
-    return <CampaignError message="No verified ClaimSpot campaign exists at this address." />
+    return <CampaignError message="No verified Atrium.ads campaign exists at this address." />
   }
 
   const campaign = chainQuery.data.campaign
@@ -157,7 +157,7 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
   const campaignTitle = copy?.title ?? `On-chain campaign ${shortAddress(campaign.publicKey.toBase58())}`
   const campaignDetails =
     copy?.details ??
-    'This campaign is live on devnet. Its original presentation metadata is unavailable, but every auction state below is read directly from the ClaimSpot program.'
+    'This campaign is live on devnet. Its original presentation metadata is unavailable, but every auction state below is read directly from the Atrium.ads auction program.'
   const liveCount = liveSpots.filter((spot) => spot.chain && statusLabel(spot.chain).startsWith('Live')).length
 
   return (
@@ -168,7 +168,7 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
             href="/"
             className="inline-flex min-h-10 items-center gap-2 rounded-full border border-black/15 bg-white px-4 text-sm font-bold focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/20"
           >
-            <ArrowLeft className="size-4" aria-hidden="true" /> ClaimSpot
+            <ArrowLeft className="size-4" aria-hidden="true" /> Atrium.ads
           </Link>
           <WalletButton />
         </div>
@@ -218,7 +218,7 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
               <span className="rounded-full border border-black/10 bg-white px-3 py-2">
                 {copy.surface.model} · {copy.surface.finish} ·{' '}
                 {copy.surface.fulfillmentMode === 'laser-etch' ? 'laser etched' : 'sticker placement'} ·{' '}
-                {copy.surface.imageHash ? 'creator photo' : 'ClaimSpot template'}
+                {copy.surface.imageHash ? 'creator photo' : 'Atrium.ads template'}
               </span>
             )}
           </div>
@@ -334,7 +334,7 @@ function CampaignError({ message, onRetry }: { message: string; onRetry?: () => 
         <div className="mt-6 flex flex-wrap gap-2">
           {onRetry && <Button onClick={onRetry}>Try again</Button>}
           <Button asChild variant="outline">
-            <Link href="/">Back to ClaimSpot</Link>
+            <Link href="/">Back to Atrium.ads</Link>
           </Button>
         </div>
       </div>

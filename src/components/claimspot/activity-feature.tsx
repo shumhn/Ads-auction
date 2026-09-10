@@ -53,7 +53,7 @@ export function ActivityFeature() {
               No fake feed.
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-neutral-400">
-              ClaimSpot backfills and polls program transactions from Solana devnet and the regional MagicBlock ER
+              Atrium.ads backfills and polls program transactions from Solana devnet and the regional MagicBlock ER
               discovered through the router, then decodes only valid Anchor events.
             </p>
           </div>
@@ -94,7 +94,7 @@ export function ActivityFeature() {
             </div>
           ) : !query.data?.activities.length ? (
             <div className="rounded-2xl border border-dashed border-white/20 p-8 text-neutral-400">
-              No decodable ClaimSpot events were returned by the configured RPCs.
+              No decodable Atrium.ads events were returned by the configured RPCs.
             </div>
           ) : (
             <ol className="grid gap-3">

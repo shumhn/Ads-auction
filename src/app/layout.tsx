@@ -14,12 +14,13 @@ const dmMono = DM_Mono({
   subsets: ['latin'],
   weight: ['400', '500'],
   variable: '--font-dm-mono',
+  display: 'swap',
 })
 
 export const metadata: Metadata = {
-  title: 'ClaimSpot — P2P sponsorship auctions for impact',
+  title: 'Atrium.ads — The P2P auction marketplace for ad space',
   description:
-    'Turn a real physical surface into sponsor spots, run live USDC auctions, and release payout after public proof.',
+    'The peer-to-peer auction marketplace for physical and digital placements. List your space; advertisers bid live or buy instantly.',
 }
 
 const links: { label: string; path: string }[] = [

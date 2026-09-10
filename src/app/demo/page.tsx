@@ -4,8 +4,8 @@ import Link from 'next/link'
 import { LiveAuction } from '@/components/claimspot/live-auction'
 
 export const metadata: Metadata = {
-  title: '22-spot devnet demo — ClaimSpot',
-  description: 'Inspect and test ClaimSpot’s full 22-spot physical laptop auction on Solana devnet.',
+  title: '22-spot devnet demo — Atrium.ads',
+  description: 'Inspect and test Atrium.ads’s full 22-spot physical MacBook auction on Solana devnet.',
 }
 
 export default function DemoPage() {
@@ -17,7 +17,7 @@ export default function DemoPage() {
             href="/"
             className="inline-flex min-h-10 items-center gap-2 rounded-md text-sm font-bold text-ink-muted focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-foreground/20"
           >
-            <ArrowLeft className="size-4" aria-hidden="true" /> Back to the ClaimSpot story
+            <ArrowLeft className="size-4" aria-hidden="true" /> Back to the Atrium.ads story
           </Link>
           <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_.65fr] lg:items-end">
             <div>
@@ -29,7 +29,7 @@ export default function DemoPage() {
               </h1>
             </div>
             <p className="max-w-xl text-base leading-7 text-ink-muted">
-              This is the technical proof behind the story: select a mapped laptop placement, inspect its live account,
+              This is the technical proof behind the story: select a mapped MacBook placement, inspect its live account,
               request test USDC, and run the full MagicBlock bidding flow.
             </p>
           </div>

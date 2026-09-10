@@ -49,13 +49,16 @@
 }
 
 :root {
+  --solana-purple: #9945ff;
+  --solana-blue: #5497d5;
+  --solana-green: #14f195;
   --font-sans-stack:
-    var(--font-manrope), -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', ui-sans-serif, system-ui,
-    sans-serif;
-  --font-display-stack:
-    var(--font-manrope), -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue',
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', var(--font-manrope),
     ui-sans-serif, system-ui, sans-serif;
-  --font-mono-stack: var(--font-dm-mono), 'SFMono-Regular', 'SF Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
+  --font-display-stack:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', var(--font-manrope),
+    ui-sans-serif, system-ui, sans-serif;
+  --font-mono-stack: 'SF Mono', 'SFMono-Regular', var(--font-dm-mono), ui-monospace, Menlo, Monaco, Consolas, monospace;
   --radius: 0.5rem;
   --background: oklch(0.985 0.006 92);
   --foreground: oklch(0.15 0.008 90);
@@ -92,6 +95,64 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+}
+
+.solana-hero-surface {
+  background:
+    radial-gradient(
+      ellipse 52% 66% at 2% 8%,
+      color-mix(in oklab, var(--solana-purple) 13%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 50% 62% at 98% 12%,
+      color-mix(in oklab, var(--solana-green) 10%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 42% 30% at 50% 88%,
+      color-mix(in oklab, var(--solana-blue) 8%, transparent),
+      transparent 74%
+    ),
+    var(--background);
+}
+
+.solana-page-surface {
+  background:
+    radial-gradient(
+      ellipse 60% 28% at 0% 12%,
+      color-mix(in oklab, var(--solana-purple) 5%, transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 58% 32% at 100% 42%,
+      color-mix(in oklab, var(--solana-green) 4%, transparent),
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 72% 24% at 50% 88%,
+      color-mix(in oklab, var(--solana-blue) 4%, transparent),
+      transparent 74%
+    ),
+    var(--background);
+}
+
+.solana-section-wash {
+  background: linear-gradient(
+    120deg,
+    color-mix(in oklab, var(--solana-purple) 3.5%, var(--background)),
+    color-mix(in oklab, var(--solana-blue) 2.5%, var(--background)) 48%,
+    color-mix(in oklab, var(--solana-green) 3%, var(--background))
+  );
+}
+
+.solana-panel {
+  background: linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--solana-purple) 4%, var(--surface-soft)),
+    color-mix(in oklab, var(--solana-blue) 3%, var(--surface-soft)) 48%,
+    color-mix(in oklab, var(--solana-green) 4%, var(--surface-soft))
+  );
 }
 
 .dark {

@@ -305,7 +305,7 @@ export function AuctionPanel({
         <p className="font-mono text-xs font-black uppercase tracking-[0.14em] text-neutral-500">Lot #{spot.id}</p>
         <h3 className="mt-3 text-xl font-black tracking-[-0.04em]">Not published yet</h3>
         <p className="mt-3 text-sm leading-6 text-neutral-600">
-          There is no devnet account for this lot, so ClaimSpot does not display invented auction data.
+          There is no devnet account for this lot, so Atrium.ads does not display invented auction data.
         </p>
       </aside>
     )

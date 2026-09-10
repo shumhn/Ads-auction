@@ -15,7 +15,7 @@ export default function AdsAuctionFeature() {
   return publicKey ? (
     <div>
       <AppHero
-        title="ClaimSpot program"
+        title="Atrium.ads auction program"
         subtitle="Inspect the generated Anchor program account on the selected cluster."
       >
         <p className="mb-6">
