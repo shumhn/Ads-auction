@@ -21,7 +21,7 @@ pub const ANTI_SNIPE_EXTENSION_SECONDS: i64 = 30;
 
 #[ephemeral]
 #[program]
-pub mod basic {
+pub mod ads_auction {
     use super::*;
 
     pub fn create_campaign(

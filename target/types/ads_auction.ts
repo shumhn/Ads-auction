@@ -2,15 +2,15 @@
  * Program IDL in camelCase format in order to be used in JS/TS.
  *
  * Note that this is only a type helper and is not the actual IDL. The original
- * IDL can be found at `target/idl/basic.json`.
+ * IDL can be found at `target/idl/ads_auction.json`.
  */
-export type Basic = {
+export type AdsAuction = {
   "address": "CkKbXccct8gWcfUyZzv2UGbDLtGSoMcsM6ZrWQ5dPnvZ",
   "metadata": {
-    "name": "basic",
+    "name": "adsAuction",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "description": "ClaimSpot peer-to-peer sponsorship auction program"
   },
   "instructions": [
     {

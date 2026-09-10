@@ -1,15 +1,15 @@
 import * as anchor from '@anchor-lang/core'
 import { Program } from '@anchor-lang/core'
-import { Basic } from '../target/types/basic'
+import { AdsAuction } from '../target/types/ads_auction'
 import { PublicKey } from '@solana/web3.js'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-describe('basic', () => {
+describe('ads_auction', () => {
   // Configure the client to use the local cluster.
   anchor.setProvider(anchor.AnchorProvider.env())
 
-  const program = anchor.workspace.Basic as Program<Basic>
+  const program = anchor.workspace.AdsAuction as Program<AdsAuction>
 
   it('creates a spot and accepts a valid base-layer bid', async () => {
     const authority = program.provider.publicKey

@@ -1,10 +1,10 @@
 {
   "address": "CkKbXccct8gWcfUyZzv2UGbDLtGSoMcsM6ZrWQ5dPnvZ",
   "metadata": {
-    "name": "basic",
+    "name": "ads_auction",
     "version": "0.1.0",
     "spec": "0.1.0",
-    "description": "Created with Anchor"
+    "description": "ClaimSpot peer-to-peer sponsorship auction program"
   },
   "instructions": [
     {

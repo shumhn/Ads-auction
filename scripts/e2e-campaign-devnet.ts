@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { getAccount, getOrCreateAssociatedTokenAccount, TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { Connection, Keypair, PublicKey, SystemProgram } from '@solana/web3.js'
-import idl from '../anchor/target/idl/basic.json'
+import idl from '../target/idl/ads_auction.json'
 
 const rpcUrl = process.env.SOLANA_RPC_URL
 if (!rpcUrl) throw new Error('SOLANA_RPC_URL is required')

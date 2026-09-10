@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { NextResponse } from 'next/server'
-import { BASIC_PROGRAM_ID as CLAIMSPOT_PROGRAM_ID } from '@project/anchor'
+import { ADS_AUCTION_PROGRAM_ID as CLAIMSPOT_PROGRAM_ID } from '@project/anchor'
 import {
   CampaignDraftMetadata,
   CampaignLotMetadata,

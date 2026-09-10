@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { ConnectionMagicRouter } from '@magicblock-labs/ephemeral-rollups-sdk'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
 import { Connection, Keypair, PublicKey, SYSVAR_RENT_PUBKEY, SystemProgram } from '@solana/web3.js'
-import idl from '../anchor/target/idl/basic.json'
+import idl from '../target/idl/ads_auction.json'
 import { DEVNET_USDC_MINT } from './devnet-usdc'
 
 const rpc = process.env.SOLANA_RPC_URL

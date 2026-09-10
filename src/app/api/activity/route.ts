@@ -2,8 +2,8 @@ import { BorshCoder, EventParser, Idl } from '@anchor-lang/core'
 import { ConnectionMagicRouter } from '@magicblock-labs/ephemeral-rollups-sdk'
 import { Connection, PublicKey } from '@solana/web3.js'
 import { NextResponse } from 'next/server'
-import idl from '../../../../anchor/target/idl/basic.json'
-import { BASIC_PROGRAM_ID } from '@project/anchor'
+import idl from '../../../../target/idl/ads_auction.json'
+import { ADS_AUCTION_PROGRAM_ID } from '@project/anchor'
 import { readJson, writeJson } from '@/lib/server-store'
 
 export const dynamic = 'force-dynamic'
@@ -42,8 +42,8 @@ async function ingestSource(connection: Connection, source: IndexedActivity['sou
   // This route is a lightweight devnet read model, not a full historical
   // indexer. Keep each request bounded so public RPC rate limits cannot stall
   // the Activity page.
-  const signatures = await connection.getSignaturesForAddress(BASIC_PROGRAM_ID, { limit: 30 }, 'confirmed')
-  const parser = new EventParser(BASIC_PROGRAM_ID, new BorshCoder(idl as Idl))
+  const signatures = await connection.getSignaturesForAddress(ADS_AUCTION_PROGRAM_ID, { limit: 30 }, 'confirmed')
+  const parser = new EventParser(ADS_AUCTION_PROGRAM_ID, new BorshCoder(idl as Idl))
   const records: IndexedActivity[] = []
 
   for (let offset = 0; offset < signatures.length; offset += 5) {
@@ -81,7 +81,7 @@ async function ingestSource(connection: Connection, source: IndexedActivity['sou
 
 async function discoverEphemeralEndpoints(base: Connection, routerEndpoint: string) {
   const coder = new BorshCoder(idl as Idl)
-  const programAccounts = await base.getProgramAccounts(BASIC_PROGRAM_ID, {
+  const programAccounts = await base.getProgramAccounts(ADS_AUCTION_PROGRAM_ID, {
     commitment: 'confirmed',
     filters: [{ dataSize: 251 }],
   })

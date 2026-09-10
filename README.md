@@ -8,6 +8,7 @@ ClaimSpot is a peer-to-peer marketplace for auctioning measurable sponsorship ri
 
 This is a real Solana devnet + MagicBlock implementation, not a local-state auction demo.
 
+- On-chain source: [`programs/ads_auction`](programs/ads_auction)
 - Program: [`CkKb…PnvZ`](https://explorer.solana.com/address/CkKbXccct8gWcfUyZzv2UGbDLtGSoMcsM6ZrWQ5dPnvZ?cluster=devnet)
 - Shared devnet USDC test mint: [`Gh9Z…tKJr`](https://explorer.solana.com/address/Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr?cluster=devnet)
 - Faucet program: [`4sN8…RBK6A`](https://explorer.solana.com/address/4sN8PnN2ki2W4TFXAfzR645FWs8nimmsYeNtxM8RBK6A?cluster=devnet)

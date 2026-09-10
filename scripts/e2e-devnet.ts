@@ -20,7 +20,7 @@ import {
   SystemProgram,
   Transaction,
 } from '@solana/web3.js'
-import idl from '../anchor/target/idl/basic.json'
+import idl from '../target/idl/ads_auction.json'
 import { DEVNET_USDC_MINT, requestDevnetUsdc } from './devnet-usdc'
 
 const baseRpc = process.env.SOLANA_RPC_URL

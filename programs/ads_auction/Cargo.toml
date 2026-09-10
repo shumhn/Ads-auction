@@ -1,12 +1,12 @@
 [package]
-name = "basic"
+name = "ads_auction"
 version = "0.1.0"
-description = "Created with Anchor"
+description = "ClaimSpot peer-to-peer sponsorship auction program"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib"]
-name = "basic"
+name = "ads_auction"
 
 [features]
 default = []

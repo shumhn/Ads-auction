@@ -3,7 +3,7 @@ import { AnchorProvider, Program, Wallet } from '@anchor-lang/core'
 import { ConnectionMagicRouter } from '@magicblock-labs/ephemeral-rollups-sdk'
 import { readFileSync } from 'node:fs'
 import { Connection, Keypair, PublicKey } from '@solana/web3.js'
-import idl from '../anchor/target/idl/basic.json'
+import idl from '../target/idl/ads_auction.json'
 
 const rpc = process.env.SOLANA_RPC_URL
 if (!rpc) throw new Error('SOLANA_RPC_URL is required')

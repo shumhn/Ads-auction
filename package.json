@@ -1,10 +1,10 @@
 {
   "name": "claimspot",
   "scripts": {
-    "anchor": "cd anchor && anchor",
-    "anchor-build": "cd anchor && anchor build",
-    "anchor-localnet": "cd anchor && anchor localnet",
-    "anchor-test": "cd anchor && anchor test",
+    "anchor": "anchor",
+    "anchor-build": "anchor build",
+    "anchor-localnet": "anchor localnet",
+    "anchor-test": "anchor test",
     "build": "next build",
     "ci": "npm run build && npm run lint && npm run format:check",
     "dev": "next dev --turbopack",
@@ -20,11 +20,11 @@
     "e2e:no-bid:devnet": "tsx scripts/e2e-no-bid-devnet.ts",
     "start": "next start"
   },
-  "displayName": "Web3js Basic",
+  "displayName": "ClaimSpot",
   "usecase": "Legacy",
-  "description": "Next.js, Tailwind, @solana/web3.js, Wallet Adapter, basic Anchor program",
+  "description": "P2P sponsorship auctions powered by Solana and MagicBlock",
   "keywords": [
-    "anchor-basic",
+    "ads-auction-program",
     "nextjs",
     "react",
     "solana-web3js",

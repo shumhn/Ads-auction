@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Anchor's generated dynamic account namespace is not exported as a stable public type. */
 
 import { AnchorProvider, BN } from '@anchor-lang/core'
-import { getBasicProgram, BASIC_PROGRAM_ID } from '@project/anchor'
+import { ADS_AUCTION_PROGRAM_ID, getAdsAuctionProgram } from '@project/anchor'
 import { ConnectionMagicRouter } from '@magicblock-labs/ephemeral-rollups-sdk'
 import { SessionTokenManager } from '@magicblock-labs/gum-sdk'
 import {
@@ -27,7 +27,7 @@ import {
 import { useCallback, useMemo, useState } from 'react'
 import { encodeU16Le, encodeU64Le } from './integer-encoding'
 
-export const CLAIMSPOT_PROGRAM_ID = BASIC_PROGRAM_ID
+export const CLAIMSPOT_PROGRAM_ID = ADS_AUCTION_PROGRAM_ID
 export const MAGICBLOCK_ROUTER_RPC = process.env.NEXT_PUBLIC_MAGIC_ROUTER_RPC ?? 'https://devnet-router.magicblock.app'
 const CLAIMSPOT_BASE_FALLBACK_RPC = process.env.NEXT_PUBLIC_SOLANA_RPC
 export const CLAIMSPOT_PAYMENT_MINT = process.env.NEXT_PUBLIC_CLAIMSPOT_PAYMENT_MINT
@@ -319,8 +319,8 @@ export function useClaimSpotProgram() {
     () => new AnchorProvider(routerConnection, wallet as AnchorWallet, { commitment: 'confirmed' }),
     [routerConnection, wallet],
   )
-  const baseProgram = useMemo(() => getBasicProgram(baseProvider), [baseProvider])
-  const routerProgram = useMemo(() => getBasicProgram(routerProvider), [routerProvider])
+  const baseProgram = useMemo(() => getAdsAuctionProgram(baseProvider), [baseProvider])
+  const routerProgram = useMemo(() => getAdsAuctionProgram(routerProvider), [routerProvider])
   // Intentionally memory-only: this is a temporary hot key. Reloading the page
   // forgets it, and the on-chain authorization expires after one hour.
   const [bidSession, setBidSession] = useState<BidSession | null>(null)
@@ -909,7 +909,7 @@ export function useClaimSpotProgram() {
             const erProvider = new AnchorProvider(new Connection(status.fqdn, 'confirmed'), wallet as AnchorWallet, {
               commitment: 'confirmed',
             })
-            const erProgram = getBasicProgram(erProvider)
+            const erProgram = getAdsAuctionProgram(erProvider)
             const account = await (erProgram.account as any).bidEscrow.fetchNullable(bidEscrow)
             if (account) {
               delegationReady = true
@@ -990,7 +990,7 @@ export function useClaimSpotProgram() {
           const erProvider = new AnchorProvider(new Connection(status.fqdn, 'confirmed'), wallet as AnchorWallet, {
             commitment: 'confirmed',
           })
-          const erProgram = getBasicProgram(erProvider)
+          const erProgram = getAdsAuctionProgram(erProvider)
           const account = await (erProgram.account as any).bidEscrow.fetchNullable(publicKey)
           if (account) {
             return {

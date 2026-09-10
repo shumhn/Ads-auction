@@ -1,9 +1,9 @@
 'use client'
 
-import { useBasicProgram } from './basic-data-access'
+import { useAdsAuctionProgram } from './ads-auction-data-access'
 
-export function BasicProgram() {
-  const { getProgramAccount } = useBasicProgram()
+export function AdsAuctionProgram() {
+  const { getProgramAccount } = useAdsAuctionProgram()
 
   if (getProgramAccount.isLoading) {
     return <p className="text-sm text-neutral-500">Checking program account…</p>

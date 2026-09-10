@@ -50,12 +50,13 @@ next-env.d.ts
 # Anchor
 /anchor/.anchor
 /anchor/.keys
-/anchor/target/*
-!/anchor/target/idl/
-!/anchor/target/idl/*.json
-!/anchor/target/types/
-!/anchor/target/types/*.ts
-/anchor/target/test-ledger
-/anchor/target/.rustc_info.json
+/anchor/target/
+/target/*
+!/target/idl/
+!/target/idl/*.json
+!/target/types/
+!/target/types/*.ts
+/target/test-ledger
+/target/.rustc_info.json
 test-ledger
 **/*.rs.bk

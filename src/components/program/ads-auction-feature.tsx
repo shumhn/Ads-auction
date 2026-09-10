@@ -3,14 +3,14 @@
 import { useWallet } from '@solana/wallet-adapter-react'
 import { ExplorerLink } from '../cluster/cluster-ui'
 import { WalletButton } from '../solana/solana-provider'
-import { useBasicProgram } from './basic-data-access'
-import { BasicProgram } from './basic-ui'
+import { useAdsAuctionProgram } from './ads-auction-data-access'
+import { AdsAuctionProgram } from './ads-auction-ui'
 import { AppHero } from '../app-hero'
 import { ellipsify } from '@/lib/utils'
 
-export default function BasicFeature() {
+export default function AdsAuctionFeature() {
   const { publicKey } = useWallet()
-  const { programId } = useBasicProgram()
+  const { programId } = useAdsAuctionProgram()
 
   return publicKey ? (
     <div>
@@ -22,7 +22,7 @@ export default function BasicFeature() {
           <ExplorerLink path={`account/${programId}`} label={ellipsify(programId.toString())} />
         </p>
       </AppHero>
-      <BasicProgram />
+      <AdsAuctionProgram />
     </div>
   ) : (
     <div className="max-w-4xl mx-auto">
