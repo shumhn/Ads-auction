@@ -1,0 +1,9 @@
+<svg width="620" height="150" viewBox="0 0 620 150" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Atrium.ads logo</title>
+  <desc id="desc">Minimal black Atrium.ads wordmark and A mark.</desc>
+  <g transform="translate(8 8)">
+    <path d="M30 130L66 22H86L122 130" stroke="#111111" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M48 88H104" stroke="#111111" stroke-width="18" stroke-linecap="round"/>
+  </g>
+  <text x="168" y="96" fill="#111111" font-family="Manrope, Inter, Arial, sans-serif" font-size="58" font-weight="750" letter-spacing="-2.8">Atrium.ads</text>
+</svg>
