@@ -1,7 +1,9 @@
 'use client'
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { PublicKey } from '@solana/web3.js'
 import { ExternalLink, LoaderCircle, Radio, ShieldCheck, TimerReset, Zap } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -26,6 +28,7 @@ import {
   toUsdcAtoms,
 } from '@/lib/claimspot'
 import { useLiveAuctionStream } from '@/lib/use-live-auction-stream'
+import { BidRecord, useLiveBidFeed } from '@/lib/use-live-bid-feed'
 
 export type LiveSpot = SpotMetadata & { chain: ChainAuction | null; artworkUrl?: string | null; draftPrice?: number }
 
@@ -162,6 +165,188 @@ export function MachineBoard({
       </div>
       <div className="absolute -bottom-2 left-1/2 h-2 w-[88%] -translate-x-1/2 rounded-b-[1rem] border-x border-b border-black/20 bg-[#a9aaa7]" />
     </div>
+  )
+}
+
+export function BidHistoryTable({
+  records,
+  realtimeStatus,
+  loading = false,
+}: {
+  records: BidRecord[]
+  realtimeStatus: 'connecting' | 'connected' | 'fallback' | 'idle'
+  loading?: boolean
+}) {
+  const { wallet } = useClaimSpotProgram()
+  const { getExplorerUrl } = useCluster()
+  const [bidView, setBidView] = useState<'all' | 'mine'>('all')
+  const walletAddress = wallet.publicKey?.toBase58() ?? null
+  const myBidRecords = walletAddress ? records.filter((record) => record.bidder === walletAddress) : []
+  const visibleRecords = bidView === 'mine' ? myBidRecords : records
+
+  return (
+    <section
+      id="bid-history"
+      className="scroll-mt-24 rounded-3xl border border-black/10 bg-white p-5 sm:p-7"
+      aria-labelledby="bid-history-heading"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p className="text-xs font-black uppercase tracking-[0.14em] text-neutral-500">Live auction ledger</p>
+          <h2 id="bid-history-heading" className="mt-2 text-2xl font-black tracking-[-0.04em]">
+            Verified bid history
+          </h2>
+          <p className="mt-1 text-sm text-neutral-500">Every public bid with its MagicBlock ER transaction.</p>
+        </div>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1.5 font-mono text-[10px] font-black uppercase tracking-[0.08em] ${
+            realtimeStatus === 'connected'
+              ? 'bg-green-100 text-green-800'
+              : realtimeStatus === 'connecting'
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-neutral-200 text-neutral-600'
+          }`}
+        >
+          <span
+            className={`size-1.5 rounded-full ${realtimeStatus === 'connected' ? 'animate-pulse bg-green-600' : 'bg-current'}`}
+            aria-hidden="true"
+          />
+          {realtimeStatus === 'connected'
+            ? 'ER push live'
+            : realtimeStatus === 'connecting'
+              ? 'Connecting'
+              : 'History fallback'}
+        </span>
+      </div>
+
+      <div
+        className="mt-5 inline-grid grid-cols-2 rounded-md bg-neutral-100 p-1"
+        role="tablist"
+        aria-label="Bid history view"
+      >
+        {(['all', 'mine'] as const).map((viewOption) => {
+          const active = bidView === viewOption
+          return (
+            <button
+              key={viewOption}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setBidView(viewOption)}
+              className={`min-h-10 min-w-32 rounded px-4 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 ${
+                active ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'
+              }`}
+            >
+              {viewOption === 'all'
+                ? `All bids (${loading ? '…' : records.length})`
+                : `My bids (${loading ? '…' : myBidRecords.length})`}
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="mt-4 h-[22rem] overflow-auto overscroll-contain rounded-xl border border-black/10">
+        {loading ? (
+          <div className="divide-y divide-black/10" role="status" aria-label="Loading verified bid history">
+            <div className="grid grid-cols-[5rem_1.2fr_1fr_1fr_1fr] border-b border-black/10 bg-surface-soft px-4 py-3">
+              {['Bid', 'Bidder', 'Amount', 'Source', 'Transaction'].map((label) => (
+                <span
+                  key={label}
+                  className="font-mono text-[11px] font-bold uppercase tracking-[0.1em] text-neutral-500 last:text-right"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+            {Array.from({ length: 5 }).map((_, index) => (
+              <div key={index} className="grid grid-cols-[5rem_1.2fr_1fr_1fr_1fr] items-center px-4 py-4">
+                <span className="size-8 animate-pulse rounded-full bg-neutral-200 motion-reduce:animate-none" />
+                <span className="h-4 w-28 animate-pulse rounded bg-neutral-200 motion-reduce:animate-none" />
+                <span className="h-4 w-24 animate-pulse rounded bg-neutral-200 motion-reduce:animate-none" />
+                <span className="h-4 w-28 animate-pulse rounded bg-neutral-200 motion-reduce:animate-none" />
+                <span className="ml-auto h-4 w-24 animate-pulse rounded bg-neutral-200 motion-reduce:animate-none" />
+              </div>
+            ))}
+            <span className="sr-only">Loading verified bids…</span>
+          </div>
+        ) : visibleRecords.length ? (
+          <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+            <thead className="sticky top-0 z-10 border-b border-black/10 bg-surface-soft font-mono text-[11px] uppercase tracking-[0.1em] text-neutral-500">
+              <tr>
+                <th className="w-20 px-4 py-3">Bid</th>
+                <th className="px-4 py-3">Bidder</th>
+                <th className="px-4 py-3">Amount</th>
+                <th className="px-4 py-3">Source</th>
+                <th className="px-4 py-3 text-right">Transaction</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-black/10 bg-white">
+              {visibleRecords.map((record) => {
+                const isMine = record.bidder === walletAddress
+                const href =
+                  record.source === 'magicblock-er' && record.endpoint
+                    ? `https://explorer.solana.com/tx/${record.signature}?cluster=custom&customUrl=${encodeURIComponent(record.endpoint)}`
+                    : getExplorerUrl(`tx/${record.signature}`)
+                return (
+                  <tr key={record.signature} className="hover:bg-neutral-50">
+                    <td className="px-4 py-3.5">
+                      <span className="grid size-8 place-items-center rounded-full bg-black font-mono text-xs font-black text-white">
+                        {record.bidCount.toString()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="font-mono font-bold">{shortAddress(record.bidder)}</span>
+                        {isMine && (
+                          <span className="rounded-full bg-signal px-2 py-1 text-[9px] font-black uppercase tracking-wide">
+                            My bid
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3.5 font-black tabular-nums">
+                      {formatUsdc(fromUsdcAtoms(record.amount))} USDC
+                    </td>
+                    <td className="px-4 py-3.5 text-xs font-bold text-neutral-500">
+                      {record.source === 'magicblock-er' ? 'MagicBlock ER' : 'Solana devnet'}
+                    </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`Open transaction ${record.signature} in explorer`}
+                        className="inline-flex min-h-10 items-center gap-1 font-mono text-xs font-bold text-neutral-500 underline decoration-neutral-300 underline-offset-4 hover:text-black focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                        title={record.signature}
+                      >
+                        {shortAddress(record.signature)} <ExternalLink className="size-3.5" aria-hidden="true" />
+                      </a>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="grid h-full place-items-center px-5 text-center">
+            <div>
+              <p className="text-base font-bold">
+                {bidView === 'mine' && !walletAddress
+                  ? 'Connect your wallet to see your bids'
+                  : bidView === 'mine'
+                    ? 'You have not bid on this lot yet'
+                    : 'No bids yet'}
+              </p>
+              <p className="mt-1 text-sm leading-6 text-neutral-500">
+                {bidView === 'mine'
+                  ? 'Your verified transactions will appear here.'
+                  : 'The first verified ER bid will appear here in real time.'}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -312,6 +497,79 @@ export function AuctionPanel({
   }
 
   const isOpen = chain.status === 'live' && !chain.closed && Number(chain.endsAt) > now
+  const walletAddress = wallet.publicKey?.toBase58() ?? null
+  const isCreator = walletAddress === chain.creator.toBase58()
+  const isLeader = chain.bidCount > 0n && walletAddress === chain.highestBidder.toBase58()
+  const isWinner = chain.status === 'settled' && walletAddress === chain.winner.toBase58()
+  const resultBidder = chain.status === 'settled' ? chain.winner : chain.highestBidder
+  const hasResultBidder = chain.bidCount > 0n && !resultBidder.equals(PublicKey.default)
+
+  const endedMessage = (() => {
+    if (chain.status === 'settled') {
+      if (isWinner) {
+        return {
+          title: 'You won this placement',
+          detail:
+            'Continue the artwork and delivery-review workflow. Your winning payment remains protected in escrow.',
+          action: 'Continue winner workflow',
+        }
+      }
+      if (isCreator) {
+        return {
+          title: 'Winner locked on Solana',
+          detail: 'Continue with artwork approval, placement delivery and proof before releasing payment.',
+          action: 'Continue delivery workflow',
+        }
+      }
+      if (escrow) {
+        return {
+          title: 'Auction settled',
+          detail: 'Your bid did not win. Return your delegated escrow and claim the available refund.',
+          action: 'Claim refund',
+        }
+      }
+      return {
+        title: 'Final result confirmed',
+        detail: 'The winner is locked on Solana. Delivery evidence and payment status will appear below.',
+        action: null,
+      }
+    }
+    if (isCreator) {
+      return chain.closed
+        ? {
+            title: 'ER result returned to Solana',
+            detail: 'The live state is committed. Lock the winner and return any unused winning budget next.',
+            action: 'Lock winner',
+          }
+        : {
+            title: 'Bidding ended — finalize the result',
+            detail: 'Close the MagicBlock auction and return the final bid state to Solana before locking the winner.',
+            action: 'Finalize auction',
+          }
+    }
+    if (isLeader) {
+      return {
+        title: 'You are the provisional winner',
+        detail:
+          'You held the highest valid bid at the deadline. The creator must commit the ER result and lock you as the winner on Solana.',
+        action: 'Open winner workflow',
+      }
+    }
+    if (escrow) {
+      return {
+        title: 'Bidding has ended',
+        detail:
+          'Wait for the creator to lock the winner. If you did not win, your refund becomes available after settlement.',
+        action: 'Track my bid',
+      }
+    }
+    return {
+      title: 'Bidding has ended',
+      detail:
+        'The creator is finalizing the MagicBlock result on Solana. Track the verified result and delivery below.',
+      action: null,
+    }
+  })()
 
   return (
     <aside className="rounded-xl border border-black/15 bg-white p-4 shadow-[0_20px_60px_-45px_rgba(0,0,0,.65)] sm:p-5">
@@ -333,23 +591,37 @@ export function AuctionPanel({
 
       <dl className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-black/10 bg-black/10">
         <div className="bg-surface-soft p-3.5">
-          <dt className="text-xs font-semibold text-neutral-500">Current top bid</dt>
+          <dt className="text-xs font-semibold text-neutral-500">
+            {isOpen ? 'Current top bid' : chain.status === 'settled' ? 'Winning bid' : 'Final top bid'}
+          </dt>
           <dd className="mt-1 text-lg font-black tabular-nums">
             {chain.highestBid > 0n ? formatUsdc(fromUsdcAtoms(chain.highestBid)) : '—'} USDC
           </dd>
         </div>
         <div className="bg-surface-soft p-3.5">
-          <dt className="text-xs font-semibold text-neutral-500">Next valid bid</dt>
-          <dd className="mt-1 text-lg font-black tabular-nums">{formatUsdc(minBid)} USDC</dd>
+          <dt className="text-xs font-semibold text-neutral-500">{isOpen ? 'Next valid bid' : 'Winner'}</dt>
+          <dd className={`mt-1 text-lg font-black ${isOpen ? 'tabular-nums' : 'font-mono'}`}>
+            {isOpen
+              ? `${formatUsdc(minBid)} USDC`
+              : hasResultBidder
+                ? shortAddress(resultBidder.toBase58())
+                : 'No bids'}
+          </dd>
         </div>
         <div className="bg-surface-soft p-3.5">
           <dt className="text-xs font-semibold text-neutral-500">Bids</dt>
           <dd className="mt-1 text-lg font-black tabular-nums">{chain.bidCount.toString()}</dd>
         </div>
         <div className="bg-surface-soft p-3.5">
-          <dt className="text-xs font-semibold text-neutral-500">Time left</dt>
+          <dt className="text-xs font-semibold text-neutral-500">{isOpen ? 'Time left' : 'Result status'}</dt>
           <dd className="mt-1 text-lg font-black">
-            <Countdown endsAt={chain.endsAt} now={now} />
+            {isOpen ? (
+              <Countdown endsAt={chain.endsAt} now={now} />
+            ) : chain.status === 'settled' ? (
+              'Confirmed'
+            ) : (
+              'Pending'
+            )}
           </dd>
         </div>
       </dl>
@@ -369,15 +641,49 @@ export function AuctionPanel({
       </a>
 
       <div className="mt-6 border-t border-black/10 pt-5">
-        {!wallet.connected ? (
+        {!isOpen ? (
+          <div className="rounded-lg border border-black/10 bg-surface-soft p-4">
+            <p className="text-xs font-black uppercase tracking-[0.12em] text-neutral-500">What happens next</p>
+            <h4 className="mt-2 text-lg font-black tracking-[-0.03em]">{endedMessage.title}</h4>
+            <p className="mt-1 text-sm leading-6 text-neutral-600">{endedMessage.detail}</p>
+            {hasResultBidder && (
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-black/10 bg-white px-3 py-2.5 text-xs">
+                <span className="font-semibold text-neutral-500">
+                  {chain.status === 'settled' ? 'Confirmed winner' : 'Highest bidder at deadline'}
+                </span>
+                <span className="font-mono font-black">{shortAddress(resultBidder.toBase58())}</span>
+              </div>
+            )}
+            <ol className="mt-4 grid gap-2 border-l border-black/15 pl-4 text-xs leading-5 text-neutral-600">
+              <li>
+                <span className="font-black text-black">1. Commit result</span> — return final auction state from
+                MagicBlock ER.
+              </li>
+              <li>
+                <span className="font-black text-black">2. Lock winner</span> — confirm the highest bidder and amount on
+                Solana.
+              </li>
+              <li>
+                <span className="font-black text-black">3. Complete delivery</span> — approved creative, placement
+                proof, winner review and payment.
+              </li>
+            </ol>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {endedMessage.action && (
+                <Button asChild className="min-h-10 bg-black text-white hover:bg-black/80">
+                  <Link href="/manage">{endedMessage.action}</Link>
+                </Button>
+              )}
+              <Button asChild variant="outline" className="min-h-10 bg-white">
+                <a href="#bid-history">View final bids</a>
+              </Button>
+            </div>
+          </div>
+        ) : !wallet.connected ? (
           <div>
             <p className="mb-3 text-sm text-neutral-600">Connect a Solana devnet wallet to lock a budget and bid.</p>
             <WalletButton />
           </div>
-        ) : !isOpen ? (
-          <p className="rounded-md bg-neutral-100 p-3 text-sm font-semibold text-neutral-700">
-            This lot is not accepting bids.
-          </p>
         ) : escrowLoading ? (
           <div className="flex items-center gap-2 text-sm text-neutral-500">
             <LoaderCircle className="size-4 animate-spin" /> Reading your on-chain escrow…
@@ -485,7 +791,7 @@ export function AuctionPanel({
                 ) : sessionActive ? (
                   'Bid instantly'
                 ) : (
-                  'Bid now'
+                  'Bid with wallet'
                 )}
               </Button>
             </div>
@@ -503,7 +809,7 @@ export function AuctionPanel({
 }
 
 export function LiveAuction() {
-  const { fetchAuctions, fetchBidEscrow, subscribeLiveAuctions, wallet } = useClaimSpotProgram()
+  const { fetchAuctions, fetchBidEscrow, subscribeLiveAuctions, subscribeBidEvents, wallet } = useClaimSpotProgram()
   const { getExplorerUrl } = useCluster()
   const [selectedAuctionId, setSelectedAuctionId] = useState(FEATURED_AUCTION_IDS[0])
   const [view, setView] = useState<'auction' | 'result'>('auction')
@@ -521,7 +827,10 @@ export function LiveAuction() {
     retry: 2,
   })
 
-  const { auctions: streamedAuctions } = useLiveAuctionStream(auctionsQuery.data ?? [], subscribeLiveAuctions)
+  const { auctions: streamedAuctions, status: accountStreamStatus } = useLiveAuctionStream(
+    auctionsQuery.data ?? [],
+    subscribeLiveAuctions,
+  )
 
   const spots = useMemo<LiveSpot[]>(() => {
     const byId = new Map(streamedAuctions.map((auction) => [Number(auction.auctionId), auction]))
@@ -529,6 +838,7 @@ export function LiveAuction() {
   }, [streamedAuctions])
 
   const selected = spots.find((spot) => spot.auctionId === selectedAuctionId) ?? spots[0]
+  const bidFeed = useLiveBidFeed(selected?.chain ?? null, subscribeBidEvents, accountStreamStatus)
   const escrowQuery = useQuery({
     queryKey: ['claimspot-escrow', selected?.chain?.publicKey.toBase58(), wallet.publicKey?.toBase58()],
     queryFn: () => fetchBidEscrow(selected.chain!.publicKey),
@@ -665,6 +975,16 @@ export function LiveAuction() {
                 onRefresh={() => auctionsQuery.refetch()}
               />
             </div>
+
+            {selected.chain && (
+              <div className="mt-8">
+                <BidHistoryTable
+                  records={bidFeed.records}
+                  realtimeStatus={bidFeed.status}
+                  loading={bidFeed.historyLoading}
+                />
+              </div>
+            )}
 
             <div id="featured-lots" className="mt-16 scroll-mt-24">
               <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
