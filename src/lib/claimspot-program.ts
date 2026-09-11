@@ -55,6 +55,7 @@ const SESSION_TOKEN_SEED = Buffer.from('session_token_v2')
 const SESSION_DURATION_SECONDS = 60 * 60
 const SESSION_TOP_UP_LAMPORTS = 5_000_000
 const LOT_SIGNING_BATCH_SIZE = 4
+const SOLANA_MULTIPLE_ACCOUNTS_LIMIT = 100
 
 export type BidSession = {
   signer: Keypair
@@ -82,6 +83,23 @@ function u16Buffer(value: number) {
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+async function getMultipleAccountsInfoBatched(
+  connection: Connection,
+  publicKeys: PublicKey[],
+  commitment: 'processed' | 'confirmed',
+) {
+  const accounts = []
+  for (let offset = 0; offset < publicKeys.length; offset += SOLANA_MULTIPLE_ACCOUNTS_LIMIT) {
+    accounts.push(
+      ...(await connection.getMultipleAccountsInfo(
+        publicKeys.slice(offset, offset + SOLANA_MULTIPLE_ACCOUNTS_LIMIT),
+        commitment,
+      )),
+    )
+  }
+  return accounts
 }
 
 function simulationFailureMessage(error: unknown, logs: string[] | null, subject = 'Transaction') {
@@ -500,7 +518,7 @@ export function useClaimSpotProgram() {
       const liveKeys = rows.map((row: any) => new PublicKey(row.account.liveAuction))
       const [liveAccounts, baseInfos] = await Promise.all([
         (routerProgram.account as any).liveAuction.fetchMultiple(liveKeys),
-        connection.getMultipleAccountsInfo(liveKeys, 'confirmed'),
+        getMultipleAccountsInfoBatched(connection, liveKeys, 'confirmed'),
       ])
 
       return rows.map((row: any, index: number) => {
@@ -592,7 +610,7 @@ export function useClaimSpotProgram() {
         // Subscribing first and then reading closes the gap between the initial
         // page query and the first pushed account notification.
         try {
-          const initialAccounts = await erConnection.getMultipleAccountsInfo(accounts, 'processed')
+          const initialAccounts = await getMultipleAccountsInfoBatched(erConnection, accounts, 'processed')
           initialAccounts.forEach((accountInfo, index) => {
             if (accountInfo) publish(accounts[index], accountInfo.data)
           })

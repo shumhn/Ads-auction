@@ -622,30 +622,36 @@ export function DashboardFeature() {
 
           <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-ink-muted sm:text-lg sm:leading-8">
             The peer-to-peer auction marketplace for physical and digital placements. Space owners list their
-            visibility; brands bid live or buy instantly.
+            visibility; brands discover the opportunity and bid live.
           </p>
 
           <p className="mx-auto mt-4 max-w-2xl font-mono text-xs font-medium uppercase leading-5 tracking-[0.08em] text-ink-muted">
-            Creators, founders, influencers, and communities can auction a logo, banner, channel, event, or physical
-            surface to make their visibility valuable—to find sponsors, create opportunities, or raise for a cause. Live
-            now: 22 spots on one real MacBook.
+            Auction a laptop, banner, channel, website, event, or physical surface. Brands compete for the placement;
+            Solana handles escrow and settlement.
           </p>
 
           {/* Action Buttons */}
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3.5">
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <a
               href="#live"
-              className="inline-flex min-h-12 items-center gap-2 rounded-full bg-foreground px-6 text-sm font-bold text-background transition-all duration-150 hover:bg-foreground/85 hover:shadow-lg focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-foreground/20"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-6 text-sm font-bold text-background transition-[background-color,transform] duration-150 hover:-translate-y-0.5 hover:bg-foreground/85 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-foreground/20 sm:w-auto"
             >
-              Bid on a MacBook spot <ArrowDown className="size-4" aria-hidden="true" />
+              Explore live auctions <ArrowDown className="size-4" aria-hidden="true" />
             </a>
             <Link
-              href="#story"
-              className="inline-flex min-h-12 items-center gap-2 rounded-full border border-foreground/15 bg-background px-6 text-sm font-semibold transition-all duration-150 hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-foreground/20"
+              href="/studio"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full border border-foreground/20 bg-background px-6 text-sm font-semibold transition-[background-color,border-color] duration-150 hover:border-foreground/35 hover:bg-surface-soft focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-foreground/20 sm:w-auto"
             >
-              See how it works <ArrowRight className="size-4" aria-hidden="true" />
+              Create an auction <ArrowRight className="size-4" aria-hidden="true" />
             </Link>
           </div>
+
+          <a
+            href="#story"
+            className="mt-4 inline-flex min-h-10 items-center gap-1.5 px-2 text-sm font-semibold text-ink-muted underline decoration-foreground/20 underline-offset-4 transition-colors duration-150 hover:text-foreground focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
+          >
+            See how it works <ArrowDown className="size-3.5" aria-hidden="true" />
+          </a>
 
           {/* Micro Trust Signals */}
           <div className="mt-8 flex flex-wrap items-center justify-center gap-x-8 gap-y-2.5 text-xs text-ink-muted">
@@ -671,9 +677,9 @@ export function DashboardFeature() {
       </section>
 
       <MarketProofSection />
+      <CampaignMarketplace />
       <StorySection />
       <MagicBlockSection />
-      <CampaignMarketplace />
       <ProofSection />
     </div>
   )

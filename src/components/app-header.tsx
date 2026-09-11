@@ -41,11 +41,6 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
                   </Link>
                 </li>
               ))}
-              <li>
-                <span className="ml-2 inline-flex min-h-8 items-center rounded-full border border-foreground/10 bg-foreground/[0.035] px-3 text-[10px] font-bold uppercase tracking-[0.12em] text-ink-muted">
-                  Any-space auctions
-                </span>
-              </li>
             </ul>
           </nav>
         </div>
@@ -66,7 +61,7 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
             href="/studio"
             className="rounded-md bg-foreground px-3.5 py-2 text-xs font-bold text-background transition-colors duration-150 hover:bg-foreground/80"
           >
-            List a surface
+            Create an auction
           </Link>
           <WalletButton />
         </div>
@@ -86,11 +81,15 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
                     </Link>
                   </li>
                 ))}
-                <li className="mt-2 border-t border-foreground/10 pt-4 text-xs font-bold uppercase tracking-[0.12em] text-ink-muted">
-                  Any-space auction marketplace
-                </li>
               </ul>
               <div className="flex flex-col gap-4">
+                <Link
+                  href="/studio"
+                  className="inline-flex min-h-11 items-center justify-center rounded-md bg-foreground px-4 text-sm font-bold text-background transition-colors duration-150 hover:bg-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/30"
+                  onClick={() => setShowMenu(false)}
+                >
+                  Create an auction
+                </Link>
                 <WalletButton />
               </div>
             </div>

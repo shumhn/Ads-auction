@@ -28,8 +28,9 @@ function remainingLabel(endsAt: number, now: number) {
   return `${Math.max(1, minutes)}m left`
 }
 
-export function CampaignMarketplace() {
+export function CampaignMarketplace({ variant = 'preview' }: { variant?: 'preview' | 'all' }) {
   const program = useClaimSpotProgram()
+  const Heading = variant === 'all' ? 'h1' : 'h2'
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1_000))
 
   useEffect(() => {
@@ -112,6 +113,7 @@ export function CampaignMarketplace() {
   }, [liveStream.auctions, marketplaceQuery.data, now])
 
   const liveCampaignCards = campaignCards.filter((campaign) => campaign.open > 0)
+  const visibleCampaignCards = variant === 'all' ? campaignCards : liveCampaignCards.slice(0, 3)
   const openCampaigns = liveCampaignCards.length
   const openLots = liveCampaignCards.reduce((sum, campaign) => sum + campaign.open, 0)
   const totalBids = liveCampaignCards.reduce((sum, campaign) => sum + campaign.bids, 0n)
@@ -125,14 +127,15 @@ export function CampaignMarketplace() {
         <div className="grid gap-7 lg:grid-cols-[1fr_auto] lg:items-end">
           <div>
             <p className="font-mono flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-neutral-500">
-              <Radio className="size-4" aria-hidden="true" /> Live auction board
+              <Radio className="size-4" aria-hidden="true" /> {variant === 'all' ? 'Auction marketplace' : 'Live now'}
             </p>
-            <h2 className="mt-4 max-w-4xl text-[clamp(2.5rem,5vw,5rem)] font-black leading-[0.92] tracking-[-0.065em]">
-              Pick a MacBook. Choose your spot.
-            </h2>
+            <Heading className="mt-4 max-w-4xl text-[clamp(2.5rem,5vw,5rem)] font-black leading-[0.92] tracking-[-0.065em]">
+              {variant === 'all' ? 'Explore every auction.' : 'Live auctions, ready for bids.'}
+            </Heading>
             <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-600">
-              This is the working product. Open a live drop to see its physical surface map, select one placement, lock
-              test USDC, and bid.
+              {variant === 'all'
+                ? 'Browse every published creator surface, compare available placements, and open the auction you want.'
+                : 'A small selection of open creator surfaces. Choose a placement, lock test USDC, and bid live.'}
             </p>
           </div>
           <div className="font-mono flex items-center gap-2 text-xs font-medium uppercase tracking-[0.06em] text-neutral-600">
@@ -192,11 +195,13 @@ export function CampaignMarketplace() {
                 <RefreshCw className="size-4" aria-hidden="true" /> Retry
               </Button>
             </div>
-          ) : liveCampaignCards.length === 0 ? (
+          ) : visibleCampaignCards.length === 0 ? (
             <div className="rounded-xl border border-dashed border-black/20 bg-white p-8 text-center">
-              <h3 className="text-2xl font-black tracking-[-0.04em]">No live auction is open yet</h3>
+              <h3 className="text-2xl font-black tracking-[-0.04em]">
+                {variant === 'all' ? 'No auction has been published yet' : 'No live auction is open yet'}
+              </h3>
               <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-neutral-600">
-                Create and publish a surface auction from Studio. It will appear here from real devnet state.
+                Create and publish a surface auction. It will appear here from real devnet state.
               </p>
               <Button asChild className="mt-5">
                 <Link href="/studio">Create auction</Link>
@@ -204,7 +209,7 @@ export function CampaignMarketplace() {
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {liveCampaignCards.map((card) => {
+              {visibleCampaignCards.map((card) => {
                 const isOpen = card.open > 0
                 const title = card.copy?.title ?? `Campaign ${shortAddress(card.address)}`
                 const surface = card.copy?.surface
@@ -290,6 +295,15 @@ export function CampaignMarketplace() {
                   </article>
                 )
               })}
+            </div>
+          )}
+          {variant === 'preview' && liveCampaignCards.length > 0 && (
+            <div className="mt-8 flex justify-center">
+              <Button asChild variant="outline" className="min-h-11 rounded-full px-5">
+                <Link href="/auctions">
+                  View all auctions <ArrowRight className="size-4" aria-hidden="true" />
+                </Link>
+              </Button>
             </div>
           )}
         </div>

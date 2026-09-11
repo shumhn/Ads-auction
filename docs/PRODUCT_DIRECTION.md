@@ -113,7 +113,7 @@ All mutable campaign, spot, and bidder-budget accounts used together must be del
 
 1. Drop page: story, funding bar, surface board, live spots, activity, countdown.
 2. Bid drawer: logo upload, exact preview, brand details, USDC budget, bid confirmation.
-3. Creator studio: surface upload, spot mapper, terms, goal, beneficiary, launch review.
+3. Creator studio: a template-only four-step flow for spot mapping, campaign terms, pricing, and launch review. Custom surface uploads remain out of the current release.
 4. Operator console: moderation, auction health, close/retry, composite generation, fulfilment, settlement.
 5. Results page: final board, winners, amounts, receipts, refunds, payout and delivery proof.
 

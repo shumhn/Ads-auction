@@ -24,9 +24,8 @@ export const metadata: Metadata = {
 }
 
 const links: { label: string; path: string }[] = [
-  { label: 'Live drops', path: '/#live' },
-  { label: 'The story', path: '/#story' },
-  { label: 'Create a drop', path: '/studio' },
+  { label: 'Auctions', path: '/auctions' },
+  { label: 'My auctions', path: '/my-auctions' },
   { label: 'Activity', path: '/activity' },
 ]
 

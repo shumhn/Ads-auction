@@ -68,7 +68,7 @@ The latest integrated E2E run settled a fresh auction, stored two real PNGs cont
 - [Fulfillment proof](https://explorer.solana.com/address/F6M286SziXPXa8mW9e5rrUv2R841QFCCMuunLnW4dtS5?cluster=devnet)
 - [No-bid auction finalized](https://explorer.solana.com/address/71K1ePwK54XaeC1FJBAaFm2ES9YLALymmxpvi6H7mKem?cluster=devnet)
 
-Use `/studio` for the creator, moderator, bidder and settlement workflows, and `/activity` for transaction-backed history.
+Use `/studio` for the template-only four-step auction builder, `/manage` for creator, moderator, fulfillment and settlement workflows, and `/activity` for transaction-backed history.
 
 ## Run
 
