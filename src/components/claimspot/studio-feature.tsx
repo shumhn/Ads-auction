@@ -187,6 +187,7 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
   const [selectedLot, setSelectedLot] = useState(0)
   const [builderStep, setBuilderStep] = useState('Ready')
   const [pending, setPending] = useState<string | null>(null)
+  const [releasedAuctionKeys, setReleasedAuctionKeys] = useState<Set<string>>(() => new Set())
   const [resumeCampaignKey, setResumeCampaignKey] = useState<string | null>(null)
   const [legacyRecovery, setLegacyRecovery] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
@@ -462,12 +463,6 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
     try {
       setPending('builder')
       const recommendedSol = 0.03 + lots.length * 0.02
-      const balanceLamports = await program.fetchSolBalance()
-      if (balanceLamports < recommendedSol * 1_000_000_000) {
-        throw new Error(
-          `Creator wallet needs about ${recommendedSol.toFixed(2)} devnet SOL for ${lots.length} lots. Use the devnet SOL button, then resume.`,
-        )
-      }
 
       setBuilderStep('Preparing the MacBook template')
       const surface = {
@@ -479,11 +474,20 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       }
       const committedDetails = campaignDetailsCommitment(details, surface)
       const moderatorKey = moderator.trim() ? new PublicKey(moderator.trim()) : program.wallet.publicKey
-      const [titleHash, detailsHash, latestQuery] = await Promise.all([
+
+      // Run balance check, hashing, and chain refetch ALL in parallel
+      // so the wallet popup appears as fast as possible.
+      const [balanceLamports, titleHash, detailsHash, latestQuery] = await Promise.all([
+        program.fetchSolBalance(),
         hashText(title.trim()),
         hashText(committedDetails),
         chainQuery.refetch(),
       ])
+      if (balanceLamports < recommendedSol * 1_000_000_000) {
+        throw new Error(
+          `Creator wallet needs about ${recommendedSol.toFixed(2)} devnet SOL for ${lots.length} lots. Use the devnet SOL button, then resume.`,
+        )
+      }
       const latestData = latestQuery.data ?? data
       const resumableCampaign = (latestData?.campaigns ?? [])
         .filter(
@@ -630,22 +634,37 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       setWizardStep(0)
       await refresh()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Campaign transaction failed')
-      setBuilderStep('Stopped at the failed transaction; completed transactions remain on devnet')
+      const message = error instanceof Error ? error.message : 'Campaign transaction failed'
+      const isBlockhash = message.toLowerCase().includes('blockhash') || message.toLowerCase().includes('block height')
+      toast.error(
+        isBlockhash
+          ? 'Transaction expired — the network was slow. Your progress is saved. Hit the button again to resume.'
+          : message,
+      )
+      setBuilderStep(
+        isBlockhash
+          ? 'Network was slow — tap the button to resume from where it stopped'
+          : 'Stopped at the failed transaction; completed transactions remain on devnet',
+      )
       await refresh()
     } finally {
       setPending(null)
     }
   }
 
-  async function run(key: string, action: () => Promise<unknown>, success: string) {
+  async function run(key: string, action: () => Promise<unknown>, success: string, onSuccess?: () => void) {
     try {
       setPending(key)
       const signature = await action()
       toast.success(success, {
         description: typeof signature === 'string' ? shortAddress(signature) : 'Confirmed on devnet',
       })
+      onSuccess?.()
       await refresh()
+      // ER commits can take a moment to become visible on the base layer. Recheck
+      // automatically so the next finalization step appears without a manual reload.
+      window.setTimeout(() => void refresh(), 2_500)
+      window.setTimeout(() => void refresh(), 7_000)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Transaction failed')
     } finally {
@@ -704,6 +723,39 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
     (auction) =>
       auction.creator.toBase58() === walletAddress || Boolean(myEscrowByAuction.get(auction.publicKey.toBase58())),
   )
+  const creatorFinalizeQueue = settlementAuctions
+    .filter(
+      (auction) =>
+        auction.creator.toBase58() === walletAddress &&
+        Number(auction.endsAt) <= nowSeconds &&
+        auction.status === 'live',
+    )
+    .sort((left, right) => {
+      const leftHasBid = left.bidCount > 0n
+      const rightHasBid = right.bidCount > 0n
+      if (leftHasBid !== rightHasBid) return rightHasBid ? 1 : -1
+      return left.auctionId < right.auctionId ? -1 : left.auctionId > right.auctionId ? 1 : 0
+    })
+  const creatorDeliveryQueue = settlementAuctions.filter(
+    (auction) =>
+      auction.creator.toBase58() === walletAddress &&
+      auction.status === 'settled' &&
+      !auction.winner.equals(PublicKey.default) &&
+      !receiptByAuction.has(auction.publicKey.toBase58()) &&
+      !releasedAuctionKeys.has(auction.publicKey.toBase58()),
+  )
+
+  function auctionNames(auction: ChainAuction) {
+    const auctionKey = auction.publicKey.toBase58()
+    const lot = lotByAuction.get(auctionKey)
+    const campaign = lot ? campaignByKey.get(lot.campaign.toBase58()) : undefined
+    const copy = campaign ? copyByCampaign.get(campaign.publicKey.toBase58()) : undefined
+    const lotCopy = copy?.lots.find((item) => item.auction === auctionKey)
+    return {
+      campaignName: copy?.title ?? (campaign ? shortAddress(campaign.publicKey.toBase58()) : 'Campaign'),
+      lotName: lotCopy?.name ?? (lot ? `Lot ${lot.lotIndex + 1}` : `Auction #${auction.auctionId.toString()}`),
+    }
+  }
   const durationAmount = Number(durationValue)
   const durationSeconds = durationAmount * DURATION_UNITS[durationUnit]
   const validDuration =
@@ -1451,6 +1503,235 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
 
           {mode === 'operations' && (
             <>
+              <div id="creator-actions" className="mb-8">
+                <Section eyebrow="Creator workflow" title="Your next auction actions">
+                  {!walletAddress ? (
+                    <Empty>Connect the creator wallet to see the next required action.</Empty>
+                  ) : chainQuery.isLoading ? (
+                    <div className="flex items-center gap-3 text-sm font-bold text-neutral-600">
+                      <LoaderCircle className="size-5 animate-spin" /> Checking ended auctions…
+                    </div>
+                  ) : creatorFinalizeQueue.length === 0 && creatorDeliveryQueue.length === 0 ? (
+                    <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                      <Check className="mt-0.5 size-5 text-emerald-700" />
+                      <div>
+                        <p className="font-black text-emerald-950">Nothing needs your attention right now.</p>
+                        <p className="mt-1 text-sm leading-6 text-emerald-800">
+                          Ended auctions and delivery steps will appear here automatically.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid gap-6">
+                      {creatorFinalizeQueue.length > 0 && (
+                        <div>
+                          <div className="mb-5 flex flex-col gap-3 rounded-2xl bg-neutral-100 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="max-w-2xl text-sm leading-6 text-neutral-700">
+                              Each ended lot takes up to two transactions: return its live MagicBlock result to Solana,
+                              then lock the winner. Lots with bids are shown first.
+                            </p>
+                            <span className="w-fit shrink-0 rounded-full bg-black px-3 py-1.5 text-xs font-black uppercase tracking-wide text-white">
+                              {creatorFinalizeQueue.length} pending
+                            </span>
+                          </div>
+                          <div className="grid gap-4">
+                            {creatorFinalizeQueue.map((auction, index) => {
+                              const { campaignName, lotName } = auctionNames(auction)
+                              const hasBid = auction.bidCount > 0n
+                              const waitingForBaseLayer = auction.closed && auction.delegated
+                              const readyToFinalize = auction.closed && !auction.delegated
+                              const closeKey = `close-${auction.publicKey}`
+                              const finalizeKey = hasBid ? `settle-${auction.publicKey}` : `no-bid-${auction.publicKey}`
+
+                              return (
+                                <article
+                                  key={auction.publicKey.toBase58()}
+                                  className="grid gap-5 rounded-2xl border border-black/10 p-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="rounded-full bg-black px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white">
+                                        Priority {index + 1}
+                                      </span>
+                                      {hasBid ? (
+                                        <span className="rounded-full bg-[#fff21c] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em]">
+                                          Winning bid
+                                        </span>
+                                      ) : (
+                                        <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-neutral-600">
+                                          No bids
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="mt-3 text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">
+                                      {campaignName}
+                                    </p>
+                                    <h3 className="mt-1 text-2xl font-black tracking-[-0.04em]">{lotName}</h3>
+                                    <p className="mt-2 text-sm leading-6 text-neutral-600">
+                                      {hasBid
+                                        ? `${formatUsdc(fromUsdcAtoms(auction.highestBid))} USDC top bid · provisional winner ${shortAddress(auction.highestBidder.toBase58())}`
+                                        : 'Bidding ended without a bid. Close this lot so it is marked complete.'}
+                                    </p>
+                                    <p className="mt-3 font-mono text-[11px] text-neutral-400">
+                                      Auction #{auction.auctionId.toString()}
+                                    </p>
+                                  </div>
+
+                                  <div className="w-full rounded-2xl border border-black/10 bg-[#fafaf7] p-4 lg:w-[330px]">
+                                    <p className="text-xs font-black uppercase tracking-[0.12em] text-neutral-500">
+                                      {readyToFinalize ? 'Step 2 of 2' : 'Step 1 of 2'}
+                                    </p>
+                                    <p className="mt-1 font-black">
+                                      {waitingForBaseLayer
+                                        ? 'Returning result to Solana'
+                                        : readyToFinalize
+                                          ? hasBid
+                                            ? 'Lock the winner'
+                                            : 'Finalize without a winner'
+                                          : 'Return the MagicBlock result'}
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-neutral-500">
+                                      {waitingForBaseLayer
+                                        ? 'Commit submitted. This page will unlock the next step automatically.'
+                                        : readyToFinalize
+                                          ? hasBid
+                                            ? 'This confirms the highest bidder and moves the lot into delivery.'
+                                            : 'This closes the empty lot with no payment or delivery required.'
+                                          : 'Commit the final ER state back to Solana before settlement.'}
+                                    </p>
+
+                                    {waitingForBaseLayer ? (
+                                      <Button className="mt-4 w-full" disabled>
+                                        <LoaderCircle className="animate-spin" /> Waiting for Solana
+                                      </Button>
+                                    ) : readyToFinalize ? (
+                                      <Button
+                                        className="mt-4 w-full"
+                                        disabled={Boolean(pending)}
+                                        onClick={() =>
+                                          run(
+                                            finalizeKey,
+                                            () =>
+                                              hasBid
+                                                ? program.finalizeAuction(auction)
+                                                : program.finalizeNoBid(auction),
+                                            hasBid
+                                              ? 'Winner locked; the lot is ready for delivery'
+                                              : 'No-bid lot finalized',
+                                          )
+                                        }
+                                      >
+                                        {pending === finalizeKey && <LoaderCircle className="animate-spin" />}
+                                        {hasBid ? 'Lock winner' : 'Finalize no bids'}
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        className="mt-4 w-full"
+                                        disabled={Boolean(pending)}
+                                        onClick={() =>
+                                          run(
+                                            closeKey,
+                                            () => program.closeAuction(auction),
+                                            'MagicBlock result is returning to Solana',
+                                          )
+                                        }
+                                      >
+                                        {pending === closeKey && <LoaderCircle className="animate-spin" />}
+                                        Return result to Solana
+                                      </Button>
+                                    )}
+                                  </div>
+                                </article>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {creatorDeliveryQueue.length > 0 && (
+                        <div>
+                          <div className="mb-4">
+                            <p className="text-xs font-black uppercase tracking-[0.12em] text-neutral-500">
+                              After finalization
+                            </p>
+                            <h3 className="mt-1 text-xl font-black tracking-[-0.03em]">Winner delivery workflow</h3>
+                          </div>
+                          <div className="grid gap-4">
+                            {creatorDeliveryQueue.map((auction) => {
+                              const { campaignName, lotName } = auctionNames(auction)
+                              const winnerCreative = (data?.creatives ?? []).find(
+                                (creative) =>
+                                  creative.auction.equals(auction.publicKey) &&
+                                  creative.submitter.equals(auction.winner),
+                              )
+                              const proof = proofByAuction.get(auction.publicKey.toBase58())
+                              const creativeApproved = winnerCreative?.status === 'approved'
+                              const proofAccepted = proof?.status === 'accepted'
+                              const nextTitle = !winnerCreative
+                                ? 'Waiting for winner artwork'
+                                : !creativeApproved
+                                  ? winnerCreative.status === 'rejected'
+                                    ? 'Winner must replace rejected artwork'
+                                    : 'Artwork needs moderator approval'
+                                  : !proof
+                                    ? 'Place the artwork and upload proof'
+                                    : !proofAccepted
+                                      ? proof.status === 'disputed'
+                                        ? 'Delivery proof was disputed'
+                                        : 'Waiting for winner proof review'
+                                      : 'Release your payment'
+                              const nextDescription = !winnerCreative
+                                ? `Winner ${shortAddress(auction.winner.toBase58())} must submit the winning creative from their wallet.`
+                                : !creativeApproved
+                                  ? 'The submitted creative must be approved before physical placement begins.'
+                                  : !proof
+                                    ? 'Complete the promised placement, then upload dated evidence for the winner.'
+                                    : !proofAccepted
+                                      ? 'Payment stays secured until the winner accepts the placement evidence.'
+                                      : `${formatUsdc(fromUsdcAtoms(auction.winningBid))} USDC is ready to release from escrow.`
+
+                              return (
+                                <article
+                                  key={auction.publicKey.toBase58()}
+                                  className="flex flex-col gap-4 rounded-2xl border border-black/10 p-5 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                  <div>
+                                    <p className="text-xs font-bold uppercase tracking-[0.12em] text-neutral-500">
+                                      {campaignName} · {lotName}
+                                    </p>
+                                    <p className="mt-2 text-lg font-black">{nextTitle}</p>
+                                    <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">
+                                      {nextDescription}
+                                    </p>
+                                  </div>
+                                  {!winnerCreative || (proof && !proofAccepted) ? (
+                                    <span className="inline-flex w-fit shrink-0 items-center gap-2 rounded-full bg-neutral-100 px-3 py-2 text-xs font-black uppercase tracking-wide text-neutral-600">
+                                      <LoaderCircle className="size-4 animate-spin" /> Waiting
+                                    </span>
+                                  ) : !creativeApproved ? (
+                                    <Button asChild variant="outline" className="shrink-0">
+                                      <a href="#moderator-actions">Review artwork</a>
+                                    </Button>
+                                  ) : !proof ? (
+                                    <Button asChild className="shrink-0">
+                                      <a href="#fulfillment-actions">Upload placement proof</a>
+                                    </Button>
+                                  ) : (
+                                    <Button asChild className="shrink-0">
+                                      <a href="#settlement-records">Release payment</a>
+                                    </Button>
+                                  )}
+                                </article>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Section>
+              </div>
+
               <div className="grid gap-8 lg:grid-cols-2">
                 <Section eyebrow="02 · Real campaigns" title="Your on-chain drops">
                   {!walletAddress ? (
@@ -1551,169 +1832,74 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                   )}
                 </Section>
 
-                <Section eyebrow="04 · Moderator queue" title="Approve actual artwork">
-                  {pendingModeration.length === 0 ? (
-                    <Empty>No pending creative assigned to this moderator wallet.</Empty>
-                  ) : (
-                    <div className="grid gap-4">
-                      {pendingModeration.map((creative) => {
-                        const lot = lotByAuction.get(creative.auction.toBase58())!
-                        const hash = bytesToHex(creative.contentHash)
-                        return (
-                          <div
-                            key={creative.publicKey.toBase58()}
-                            className="grid gap-4 rounded-2xl border border-black/10 p-4 sm:grid-cols-[112px_1fr]"
-                          >
-                            <Image
-                              src={`/api/uploads/${hash}`}
-                              alt="Submitted sponsor artwork"
-                              width={112}
-                              height={112}
-                              unoptimized
-                              className="aspect-square w-28 rounded-xl border object-contain"
-                            />
-                            <div>
-                              <p className="font-black">From {shortAddress(creative.submitter.toBase58())}</p>
-                              <p className="mt-1 font-mono text-xs text-neutral-500">SHA-256 {hash.slice(0, 16)}…</p>
-                              <div className="mt-4 flex gap-2">
-                                <Button
-                                  size="sm"
-                                  disabled={Boolean(pending)}
-                                  onClick={() =>
-                                    run(
-                                      `review-${creative.publicKey}`,
-                                      () =>
-                                        program.reviewCreative(
-                                          lot.campaign,
-                                          lot.publicKey,
-                                          creative.auction,
-                                          creative.publicKey,
-                                          true,
-                                          '',
-                                        ),
-                                      'Artwork approved on devnet',
-                                    )
-                                  }
-                                >
-                                  <Check /> Approve
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  disabled={Boolean(pending)}
-                                  onClick={() =>
-                                    run(
-                                      `review-${creative.publicKey}`,
-                                      () =>
-                                        program.reviewCreative(
-                                          lot.campaign,
-                                          lot.publicKey,
-                                          creative.auction,
-                                          creative.publicKey,
-                                          false,
-                                          'Does not meet campaign requirements',
-                                        ),
-                                      'Artwork rejected on devnet',
-                                    )
-                                  }
-                                >
-                                  Reject
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </Section>
-
-                <Section eyebrow="05 · Fulfillment" title="Prove the placement">
-                  {creatorProofs.length === 0 ? (
-                    <Empty>No settled winning lot is waiting for creator proof.</Empty>
-                  ) : (
-                    <div className="grid gap-4">
-                      {creatorProofs.map((auction) => (
-                        <div key={auction.publicKey.toBase58()} className="rounded-2xl border border-black/10 p-4">
-                          <p className="font-black">
-                            {formatUsdc(fromUsdcAtoms(auction.winningBid))} USDC secured for delivery
-                          </p>
-                          <p className="mt-1 text-sm text-neutral-500">
-                            Upload dated placement proof. Payment remains in the vault until the winner accepts it.
-                          </p>
-                          <div className="mt-4">
-                            <ImageTransaction
-                              label="Upload proof"
-                              pending={pending === `proof-${auction.publicKey}`}
-                              onSubmit={(file) => submitFulfillment(auction, file)}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {winnerProofs.length > 0 && (
-                    <div className="mt-6 border-t pt-6">
-                      <p className="mb-3 text-xs font-black uppercase tracking-wide">Awaiting your winner review</p>
+                <div id="moderator-actions" className="scroll-mt-24">
+                  <Section eyebrow="04 · Moderator queue" title="Approve actual artwork">
+                    {pendingModeration.length === 0 ? (
+                      <Empty>No pending creative assigned to this moderator wallet.</Empty>
+                    ) : (
                       <div className="grid gap-4">
-                        {winnerProofs.map((proof) => {
-                          const lot = lotByAuction.get(proof.auction.toBase58())
-                          if (!lot) return null
-                          const hash = bytesToHex(proof.contentHash)
+                        {pendingModeration.map((creative) => {
+                          const lot = lotByAuction.get(creative.auction.toBase58())!
+                          const hash = bytesToHex(creative.contentHash)
                           return (
                             <div
-                              key={proof.publicKey.toBase58()}
+                              key={creative.publicKey.toBase58()}
                               className="grid gap-4 rounded-2xl border border-black/10 p-4 sm:grid-cols-[112px_1fr]"
                             >
                               <Image
                                 src={`/api/uploads/${hash}`}
-                                alt="Creator fulfillment proof"
+                                alt="Submitted sponsor artwork"
                                 width={112}
                                 height={112}
                                 unoptimized
-                                className="aspect-square w-28 rounded-xl border object-cover"
+                                className="aspect-square w-28 rounded-xl border object-contain"
                               />
                               <div>
-                                <p className="font-black">Delivery proof</p>
+                                <p className="font-black">From {shortAddress(creative.submitter.toBase58())}</p>
+                                <p className="mt-1 font-mono text-xs text-neutral-500">SHA-256 {hash.slice(0, 16)}…</p>
                                 <div className="mt-4 flex gap-2">
                                   <Button
                                     size="sm"
+                                    disabled={Boolean(pending)}
                                     onClick={() =>
                                       run(
-                                        `proof-review-${proof.publicKey}`,
+                                        `review-${creative.publicKey}`,
                                         () =>
-                                          program.reviewProof(
+                                          program.reviewCreative(
                                             lot.campaign,
                                             lot.publicKey,
-                                            proof.auction,
-                                            proof.publicKey,
+                                            creative.auction,
+                                            creative.publicKey,
                                             true,
+                                            '',
                                           ),
-                                        'Fulfillment accepted on devnet',
+                                        'Artwork approved on devnet',
                                       )
                                     }
                                   >
-                                    Accept
+                                    <Check /> Approve
                                   </Button>
                                   <Button
                                     size="sm"
                                     variant="outline"
+                                    disabled={Boolean(pending)}
                                     onClick={() =>
                                       run(
-                                        `proof-review-${proof.publicKey}`,
+                                        `review-${creative.publicKey}`,
                                         () =>
-                                          program.reviewProof(
+                                          program.reviewCreative(
                                             lot.campaign,
                                             lot.publicKey,
-                                            proof.auction,
-                                            proof.publicKey,
+                                            creative.auction,
+                                            creative.publicKey,
                                             false,
+                                            'Does not meet campaign requirements',
                                           ),
-                                        'Fulfillment disputed on devnet',
+                                        'Artwork rejected on devnet',
                                       )
                                     }
                                   >
-                                    Dispute
+                                    Reject
                                   </Button>
                                 </div>
                               </div>
@@ -1721,212 +1907,283 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                           )
                         })}
                       </div>
-                    </div>
-                  )}
-                </Section>
-              </div>
+                    )}
+                  </Section>
+                </div>
 
-              <Section eyebrow="06 · Settlement desk" title="Close, settle and refund">
-                {settlementAuctions.length === 0 ? (
-                  <Empty>No creator, leader or winner auctions were found for this wallet.</Empty>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[850px] text-left text-sm">
-                      <thead>
-                        <tr className="border-b text-xs uppercase tracking-wide text-neutral-500">
-                          <th className="px-3 py-3">Auction</th>
-                          <th className="px-3 py-3">State</th>
-                          <th className="px-3 py-3">Top bid</th>
-                          <th className="px-3 py-3">MagicBlock</th>
-                          <th className="px-3 py-3">Available action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {settlementAuctions.map((auction) => {
-                          const creator = auction.creator.toBase58() === walletAddress
-                          const winner =
-                            auction.highestBidder.toBase58() === walletAddress ||
-                            auction.winner.toBase58() === walletAddress
-                          const myEscrow = myEscrowByAuction.get(auction.publicKey.toBase58())
-                          const ended = Number(auction.endsAt) <= nowSeconds
-                          const receipt = receiptByAuction.get(auction.publicKey.toBase58())
-                          const lot = lotByAuction.get(auction.publicKey.toBase58())
-                          const proof = proofByAuction.get(auction.publicKey.toBase58())
-                          const approvedWinnerCreative = (data?.creatives ?? []).find(
-                            (creative) =>
-                              creative.auction.equals(auction.publicKey) &&
-                              creative.submitter.equals(auction.winner) &&
-                              creative.status === 'approved',
-                          )
-                          const paymentReady =
-                            creator &&
-                            auction.status === 'settled' &&
-                            !receipt &&
-                            Boolean(lot) &&
-                            proof?.status === 'accepted' &&
-                            Boolean(approvedWinnerCreative)
-                          return (
-                            <tr key={auction.publicKey.toBase58()} className="border-b last:border-0">
-                              <td className="px-3 py-4 font-mono">#{auction.auctionId.toString()}</td>
-                              <td className="px-3 py-4">
-                                {receipt
-                                  ? 'Paid'
-                                  : auction.status === 'settled' && !auction.winner.equals(PublicKey.default)
-                                    ? 'Delivery escrow'
-                                    : auction.status === 'settled'
-                                      ? 'Closed · no bids'
-                                      : auction.closed
-                                        ? 'Closed'
-                                        : ended
-                                          ? 'Ended'
-                                          : 'Live'}
-                              </td>
-                              <td className="px-3 py-4">{formatUsdc(fromUsdcAtoms(auction.highestBid))} USDC</td>
-                              <td className="px-3 py-4">{auction.delegated ? 'Delegated' : 'Base layer'}</td>
-                              <td className="px-3 py-4">
-                                <div className="flex flex-wrap gap-2">
-                                  {creator && ended && !auction.closed && auction.delegated && (
+                <div id="fulfillment-actions" className="scroll-mt-24">
+                  <Section eyebrow="05 · Fulfillment" title="Prove the placement">
+                    {creatorProofs.length === 0 ? (
+                      <Empty>No settled winning lot is waiting for creator proof.</Empty>
+                    ) : (
+                      <div className="grid gap-4">
+                        {creatorProofs.map((auction) => (
+                          <div key={auction.publicKey.toBase58()} className="rounded-2xl border border-black/10 p-4">
+                            <p className="font-black">
+                              {formatUsdc(fromUsdcAtoms(auction.winningBid))} USDC secured for delivery
+                            </p>
+                            <p className="mt-1 text-sm text-neutral-500">
+                              Upload dated placement proof. Payment remains in the vault until the winner accepts it.
+                            </p>
+                            <div className="mt-4">
+                              <ImageTransaction
+                                label="Upload proof"
+                                pending={pending === `proof-${auction.publicKey}`}
+                                onSubmit={(file) => submitFulfillment(auction, file)}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {winnerProofs.length > 0 && (
+                      <div className="mt-6 border-t pt-6">
+                        <p className="mb-3 text-xs font-black uppercase tracking-wide">Awaiting your winner review</p>
+                        <div className="grid gap-4">
+                          {winnerProofs.map((proof) => {
+                            const lot = lotByAuction.get(proof.auction.toBase58())
+                            if (!lot) return null
+                            const hash = bytesToHex(proof.contentHash)
+                            return (
+                              <div
+                                key={proof.publicKey.toBase58()}
+                                className="grid gap-4 rounded-2xl border border-black/10 p-4 sm:grid-cols-[112px_1fr]"
+                              >
+                                <Image
+                                  src={`/api/uploads/${hash}`}
+                                  alt="Creator fulfillment proof"
+                                  width={112}
+                                  height={112}
+                                  unoptimized
+                                  className="aspect-square w-28 rounded-xl border object-cover"
+                                />
+                                <div>
+                                  <p className="font-black">Delivery proof</p>
+                                  <div className="mt-4 flex gap-2">
                                     <Button
                                       size="sm"
                                       onClick={() =>
                                         run(
-                                          `close-${auction.publicKey}`,
-                                          () => program.closeAuction(auction),
-                                          'Result committed from MagicBlock',
+                                          `proof-review-${proof.publicKey}`,
+                                          () =>
+                                            program.reviewProof(
+                                              lot.campaign,
+                                              lot.publicKey,
+                                              proof.auction,
+                                              proof.publicKey,
+                                              true,
+                                            ),
+                                          'Fulfillment accepted on devnet',
                                         )
                                       }
                                     >
-                                      Close & return
+                                      Accept
                                     </Button>
-                                  )}
-                                  {creator &&
-                                    auction.closed &&
-                                    auction.status === 'live' &&
-                                    auction.bidCount === 0n &&
-                                    !auction.delegated && (
-                                      <Button
-                                        size="sm"
-                                        onClick={() =>
-                                          run(
-                                            `no-bid-${auction.publicKey}`,
-                                            () => program.finalizeNoBid(auction),
-                                            'No-bid auction finalized',
-                                          )
-                                        }
-                                      >
-                                        Finalize no bids
-                                      </Button>
-                                    )}
-                                  {myEscrow?.delegated && !winner && auction.closed && auction.status === 'live' && (
                                     <Button
                                       size="sm"
                                       variant="outline"
                                       onClick={() =>
                                         run(
-                                          `undelegate-${auction.publicKey}`,
-                                          () => program.undelegateMyBid(auction.publicKey),
-                                          'Bid escrow returned to Solana',
-                                        )
-                                      }
-                                    >
-                                      Return my escrow
-                                    </Button>
-                                  )}
-                                  {creator &&
-                                    auction.closed &&
-                                    auction.status === 'live' &&
-                                    auction.bidCount > 0n &&
-                                    !auction.delegated && (
-                                      <Button
-                                        size="sm"
-                                        onClick={() =>
-                                          run(
-                                            `settle-${auction.publicKey}`,
-                                            () => program.finalizeAuction(auction),
-                                            'Winner locked; excess returned. Payment awaits accepted proof.',
-                                          )
-                                        }
-                                      >
-                                        Lock winner
-                                      </Button>
-                                    )}
-                                  {paymentReady && lot && proof && approvedWinnerCreative && (
-                                    <Button
-                                      size="sm"
-                                      onClick={() =>
-                                        run(
-                                          `release-${auction.publicKey}`,
+                                          `proof-review-${proof.publicKey}`,
                                           () =>
-                                            program.releasePayment(
-                                              auction,
+                                            program.reviewProof(
                                               lot.campaign,
                                               lot.publicKey,
-                                              approvedWinnerCreative.publicKey,
+                                              proof.auction,
                                               proof.publicKey,
+                                              false,
                                             ),
-                                          'Proof accepted; USDC released to creator',
+                                          'Fulfillment disputed on devnet',
                                         )
                                       }
                                     >
-                                      Release payment
+                                      Dispute
                                     </Button>
-                                  )}
-                                  {auction.status === 'settled' &&
-                                    myEscrow &&
-                                    !myEscrow.delegated &&
-                                    !myEscrow.claimed &&
-                                    auction.winner.toBase58() !== walletAddress && (
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </Section>
+                </div>
+              </div>
+
+              <div id="settlement-records" className="mt-8">
+                <Section eyebrow="Settlement records" title="All lots and refunds">
+                  {settlementAuctions.length === 0 ? (
+                    <Empty>No creator, leader or winner auctions were found for this wallet.</Empty>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[850px] text-left text-sm">
+                        <thead>
+                          <tr className="border-b text-xs uppercase tracking-wide text-neutral-500">
+                            <th className="px-3 py-3">Auction</th>
+                            <th className="px-3 py-3">State</th>
+                            <th className="px-3 py-3">Top bid</th>
+                            <th className="px-3 py-3">MagicBlock</th>
+                            <th className="px-3 py-3">Available action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {settlementAuctions.map((auction) => {
+                            const creator = auction.creator.toBase58() === walletAddress
+                            const winner =
+                              auction.highestBidder.toBase58() === walletAddress ||
+                              auction.winner.toBase58() === walletAddress
+                            const myEscrow = myEscrowByAuction.get(auction.publicKey.toBase58())
+                            const ended = Number(auction.endsAt) <= nowSeconds
+                            const receipt = receiptByAuction.get(auction.publicKey.toBase58())
+                            const released = Boolean(receipt) || releasedAuctionKeys.has(auction.publicKey.toBase58())
+                            const lot = lotByAuction.get(auction.publicKey.toBase58())
+                            const proof = proofByAuction.get(auction.publicKey.toBase58())
+                            const approvedWinnerCreative = (data?.creatives ?? []).find(
+                              (creative) =>
+                                creative.auction.equals(auction.publicKey) &&
+                                creative.submitter.equals(auction.winner) &&
+                                creative.status === 'approved',
+                            )
+                            const paymentReady =
+                              creator &&
+                              auction.status === 'settled' &&
+                              !released &&
+                              Boolean(lot) &&
+                              proof?.status === 'accepted' &&
+                              Boolean(approvedWinnerCreative)
+                            return (
+                              <tr key={auction.publicKey.toBase58()} className="border-b last:border-0">
+                                <td className="px-3 py-4">
+                                  <span className="block font-bold">{auctionNames(auction).lotName}</span>
+                                  <span className="mt-1 block font-mono text-[11px] text-neutral-400">
+                                    #{auction.auctionId.toString()}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-4">
+                                  {released
+                                    ? 'Paid'
+                                    : auction.status === 'settled' && !auction.winner.equals(PublicKey.default)
+                                      ? 'Delivery escrow'
+                                      : auction.status === 'settled'
+                                        ? 'Closed · no bids'
+                                        : auction.closed
+                                          ? 'Closed'
+                                          : ended
+                                            ? 'Ended'
+                                            : 'Live'}
+                                </td>
+                                <td className="px-3 py-4">{formatUsdc(fromUsdcAtoms(auction.highestBid))} USDC</td>
+                                <td className="px-3 py-4">{auction.delegated ? 'Delegated' : 'Base layer'}</td>
+                                <td className="px-3 py-4">
+                                  <div className="flex flex-wrap gap-2">
+                                    {creator && ended && auction.status === 'live' && (
+                                      <a
+                                        href="#creator-actions"
+                                        className="text-xs font-bold underline underline-offset-4"
+                                      >
+                                        Complete in action queue
+                                      </a>
+                                    )}
+                                    {myEscrow?.delegated && !winner && auction.closed && auction.status === 'live' && (
                                       <Button
                                         size="sm"
                                         variant="outline"
                                         onClick={() =>
                                           run(
-                                            `refund-${auction.publicKey}`,
-                                            () => program.claimRefund(auction),
-                                            'Loser refund claimed',
+                                            `undelegate-${auction.publicKey}`,
+                                            () => program.undelegateMyBid(auction.publicKey),
+                                            'Bid escrow returned to Solana',
                                           )
                                         }
                                       >
-                                        Claim refund
+                                        Return my escrow
                                       </Button>
                                     )}
-                                  {auction.status === 'settled' && myEscrow?.delegated && !winner && (
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() =>
-                                        run(
-                                          `undelegate-${auction.publicKey}`,
-                                          () => program.undelegateMyBid(auction.publicKey),
-                                          'Bid escrow returned to Solana',
-                                        )
-                                      }
-                                    >
-                                      Return escrow before refund
-                                    </Button>
-                                  )}
-                                  {receipt && (
-                                    <span className="inline-flex items-center gap-1.5 px-2 font-bold text-green-700">
-                                      <ShieldCheck className="size-4" /> Paid & complete
-                                    </span>
-                                  )}
-                                  {auction.status === 'settled' &&
-                                    !receipt &&
-                                    !auction.winner.equals(PublicKey.default) && (
-                                      <span className="inline-flex items-center gap-1.5 px-2 font-bold text-amber-700">
-                                        <ShieldCheck className="size-4" /> Awaiting delivery acceptance
+                                    {paymentReady && lot && proof && approvedWinnerCreative && (
+                                      <Button
+                                        size="sm"
+                                        onClick={() =>
+                                          run(
+                                            `release-${auction.publicKey}`,
+                                            () =>
+                                              program.releasePayment(
+                                                auction,
+                                                lot.campaign,
+                                                lot.publicKey,
+                                                approvedWinnerCreative.publicKey,
+                                                proof.publicKey,
+                                              ),
+                                            'Proof accepted; USDC released to creator',
+                                            () =>
+                                              setReleasedAuctionKeys((current) => {
+                                                const next = new Set(current)
+                                                next.add(auction.publicKey.toBase58())
+                                                return next
+                                              }),
+                                          )
+                                        }
+                                      >
+                                        Release payment
+                                      </Button>
+                                    )}
+                                    {auction.status === 'settled' &&
+                                      myEscrow &&
+                                      !myEscrow.delegated &&
+                                      !myEscrow.claimed &&
+                                      auction.winner.toBase58() !== walletAddress && (
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() =>
+                                            run(
+                                              `refund-${auction.publicKey}`,
+                                              () => program.claimRefund(auction),
+                                              'Loser refund claimed',
+                                            )
+                                          }
+                                        >
+                                          Claim refund
+                                        </Button>
+                                      )}
+                                    {auction.status === 'settled' && myEscrow?.delegated && !winner && (
+                                      <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={() =>
+                                          run(
+                                            `undelegate-${auction.publicKey}`,
+                                            () => program.undelegateMyBid(auction.publicKey),
+                                            'Bid escrow returned to Solana',
+                                          )
+                                        }
+                                      >
+                                        Return escrow before refund
+                                      </Button>
+                                    )}
+                                    {released && (
+                                      <span className="inline-flex items-center gap-1.5 px-2 font-bold text-green-700">
+                                        <ShieldCheck className="size-4" /> Paid & complete
                                       </span>
                                     )}
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </Section>
+                                    {auction.status === 'settled' &&
+                                      !released &&
+                                      !auction.winner.equals(PublicKey.default) && (
+                                        <span className="inline-flex items-center gap-1.5 px-2 font-bold text-amber-700">
+                                          <ShieldCheck className="size-4" /> Awaiting delivery acceptance
+                                        </span>
+                                      )}
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </Section>
+              </div>
             </>
           )}
         </div>
