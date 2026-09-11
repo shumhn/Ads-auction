@@ -17,6 +17,7 @@ type IndexedActivity = {
   eventIndex: number
   name: string
   data: Record<string, unknown>
+  endpoint?: string
 }
 
 type ActivityStore = {
@@ -71,6 +72,7 @@ async function ingestSource(connection: Connection, source: IndexedActivity['sou
           eventIndex,
           name: event.name,
           data: jsonSafe(event.data) as Record<string, unknown>,
+          endpoint: connection.rpcEndpoint,
         })
         eventIndex += 1
       }
@@ -115,7 +117,7 @@ async function discoverEphemeralEndpoints(base: Connection, routerEndpoint: stri
 export async function GET() {
   const store = await readJson<ActivityStore>('activity.json', { updatedAt: null, activities: [], health: {} })
   const updatedAt = store.updatedAt ? Date.parse(store.updatedAt) : 0
-  if (updatedAt > 0 && Date.now() - updatedAt < 30_000) {
+  if (updatedAt > 0 && Date.now() - updatedAt < 5_000) {
     return NextResponse.json(store, {
       headers: { 'Cache-Control': 'no-store', 'X-ClaimSpot-Indexer': 'fresh-cache' },
     })
