@@ -2,7 +2,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Anchor's generated dynamic account namespace is not exported as a stable public type. */
 
-import { AnchorProvider, BN } from '@anchor-lang/core'
+import { AnchorProvider, BN, EventParser } from '@anchor-lang/core'
 import { ADS_AUCTION_PROGRAM_ID, getAdsAuctionProgram } from '@project/anchor'
 import { ConnectionMagicRouter } from '@magicblock-labs/ephemeral-rollups-sdk'
 import { SessionTokenManager } from '@magicblock-labs/gum-sdk'
@@ -83,6 +83,64 @@ function u16Buffer(value: number) {
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+/**
+ * Confirm a transaction over plain HTTP polling instead of web3.js
+ * `confirmTransaction`, which depends on a working websocket subscription.
+ * When wss:// is unavailable (some RPC proxies, VPNs, browsers) the websocket
+ * path never fires and the caller burns the whole blockhash lifetime before
+ * reporting "block height exceeded" — even for transactions that landed.
+ *
+ * Throws an error whose message contains "block height exceeded" once the
+ * blockhash is provably dead, so callers' blockhash retry logic keeps working.
+ */
+async function confirmSignatureHttp(
+  connection: Connection,
+  signature: string,
+  lastValidBlockHeight: number | null,
+  commitment: 'confirmed' | 'finalized' = 'confirmed',
+  timeoutMs = 90_000,
+) {
+  const startedAt = Date.now()
+  for (;;) {
+    const [statusResult, heightResult] = await Promise.allSettled([
+      connection.getSignatureStatuses([signature]),
+      lastValidBlockHeight === null ? Promise.resolve(null) : connection.getBlockHeight(commitment),
+    ])
+
+    if (statusResult.status === 'fulfilled') {
+      const status = statusResult.value.value[0]
+      if (status) {
+        if (status.err) {
+          throw new Error(`Transaction failed on-chain: ${JSON.stringify(status.err)}`)
+        }
+        const confirmedEnough =
+          commitment === 'finalized'
+            ? status.confirmationStatus === 'finalized'
+            : status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized'
+        if (confirmedEnough) return
+      }
+    }
+
+    if (
+      heightResult.status === 'fulfilled' &&
+      heightResult.value !== null &&
+      heightResult.value > (lastValidBlockHeight ?? 0)
+    ) {
+      const statusUnknown = statusResult.status !== 'fulfilled' || statusResult.value.value[0] == null
+      if (statusUnknown) {
+        // Blockhash dead and the signature was never seen — the transaction can
+        // no longer land, so fail fast instead of burning the full timeout.
+        throw new Error(`Transaction expired: block height exceeded (${signature})`)
+      }
+    }
+
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Confirmation timeout — blockhash may have expired (${signature})`)
+    }
+    await wait(1_500)
+  }
 }
 
 async function getMultipleAccountsInfoBatched(
@@ -250,6 +308,17 @@ export type LiveAuctionRealtimeUpdate = {
   closed: boolean
 }
 
+export type LiveBidRealtimeEvent = {
+  auction: PublicKey
+  bidder: PublicKey
+  previousBidder: PublicKey
+  amount: bigint
+  bidCount: bigint
+  endsAt: bigint
+  signature: string
+  endpoint: string
+}
+
 export type ChainCampaign = {
   publicKey: PublicKey
   creator: PublicKey
@@ -354,38 +423,47 @@ export function useClaimSpotProgram() {
   }, [])
 
   const signAndSendBaseTransaction = useCallback(
-    async (transaction: Transaction, subject: string) => {
+    async (transaction: Transaction, subject: string, options?: { beforeSign?: (tx: Transaction) => void }) => {
       const feePayer = requireWallet()
       if (!wallet.signTransaction) throw new Error('Connected wallet cannot sign transactions')
 
-      const attempts = Math.max(3, baseWriteConnections.length)
+      const attempts = Math.max(5, baseWriteConnections.length * 2)
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         const writeConnection = baseWriteConnections[attempt % baseWriteConnections.length]
         try {
-          const latest = await writeConnection.getLatestBlockhash('confirmed')
+          // 1. Simulate the UNSIGNED transaction first. This catches program errors
+          //    without a wallet popup and without burning any blockhash lifetime —
+          //    the RPC substitutes its own recent blockhash for the unsigned sim.
           transaction.signatures = []
           transaction.feePayer = feePayer
-          transaction.recentBlockhash = latest.blockhash
-          transaction.lastValidBlockHeight = latest.lastValidBlockHeight
-
           const simulation = await writeConnection.simulateTransaction(transaction)
           if (simulation.value.err) {
-            if (isBlockhashFailure(simulation.value.err)) continue
+            if (isBlockhashFailure(simulation.value.err)) {
+              if (attempt < attempts - 1) await wait(300)
+              continue
+            }
             throw new Error(simulationFailureMessage(simulation.value.err, simulation.value.logs, subject))
           }
 
+          // 2. Only now spend a fresh blockhash and one wallet approval. The window
+          //    between blockhash fetch and broadcast is just the user's approval,
+          //    which is what used to expire the blockhash when popups were slow.
+          const latest = await writeConnection.getLatestBlockhash('confirmed')
+          transaction.signatures = []
+          transaction.recentBlockhash = latest.blockhash
+          transaction.lastValidBlockHeight = latest.lastValidBlockHeight
+          options?.beforeSign?.(transaction)
           const signed = await wallet.signTransaction(transaction)
+
           const signature = await writeConnection.sendRawTransaction(signed.serialize(), {
-            maxRetries: 5,
-            preflightCommitment: 'confirmed',
+            maxRetries: 8,
+            skipPreflight: true,
           })
-          const confirmation = await writeConnection.confirmTransaction({ signature, ...latest }, 'confirmed')
-          if (confirmation.value.err) {
-            throw new Error(`${subject} failed on-chain: ${JSON.stringify(confirmation.value.err)}`)
-          }
+          await confirmSignatureHttp(writeConnection, signature, latest.lastValidBlockHeight, 'confirmed')
           return signature
         } catch (error) {
           if (!isRetryableRpcFailure(error) || attempt >= attempts - 1) throw error
+          await wait(300)
         }
       }
 
@@ -394,43 +472,52 @@ export function useClaimSpotProgram() {
     [baseWriteConnections, requireWallet, wallet],
   )
 
-  const signAndSendRouterTransaction = useCallback(
-    async (transaction: Transaction, subject: string) => {
+  const signAndSendErTransaction = useCallback(
+    async (transaction: Transaction, routeAccount: PublicKey, subject: string) => {
       const feePayer = requireWallet()
       if (!wallet.signTransaction) throw new Error('Connected wallet cannot sign transactions')
 
-      for (let attempt = 0; attempt < 3; attempt += 1) {
+      const status = (await routerConnection.getDelegationStatus(routeAccount)) as MagicBlockDelegationStatus
+      if (!status.isDelegated || !status.fqdn) {
+        throw new Error(`${subject} cannot continue because its MagicBlock account is not delegated`)
+      }
+      const erConnection = new Connection(status.fqdn, 'confirmed')
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
         transaction.signatures = []
         transaction.feePayer = feePayer
 
-        // A normal getLatestBlockhash() can come from a different bank than the
-        // ER selected for this transaction. The router must choose the bank from
-        // the writable accounts first, then provide that bank's blockhash.
-        const latest = await routerConnection.getLatestBlockhashForTransaction(transaction, {
-          commitment: 'confirmed',
-        })
-        transaction.recentBlockhash = latest.blockhash
-        transaction.lastValidBlockHeight = latest.lastValidBlockHeight
-
-        const simulation = await routerConnection.simulateTransaction(transaction)
+        // The router only resolves delegation; it does not implement standard
+        // Solana methods such as simulateTransaction. Execute against the exact
+        // ER bank selected for this delegated account.
+        const simulation = await erConnection.simulateTransaction(transaction)
         if (simulation.value.err) {
-          if (isBlockhashFailure(simulation.value.err) && attempt < 2) continue
+          if (isBlockhashFailure(simulation.value.err) && attempt < 4) {
+            await wait(500)
+            continue
+          }
           throw new Error(simulationFailureMessage(simulation.value.err, simulation.value.logs, subject))
         }
 
+        const latest = await erConnection.getLatestBlockhash('confirmed')
+        transaction.signatures = []
+        transaction.feePayer = feePayer
+        transaction.recentBlockhash = latest.blockhash
+        transaction.lastValidBlockHeight = latest.lastValidBlockHeight
         const signed = await wallet.signTransaction(transaction)
         try {
-          const signature = await routerConnection.sendRawTransaction(signed.serialize(), {
-            maxRetries: 5,
-            preflightCommitment: 'confirmed',
+          const signature = await erConnection.sendRawTransaction(signed.serialize(), {
+            maxRetries: 8,
+            skipPreflight: true,
           })
-          const confirmation = await routerConnection.confirmTransaction({ signature, ...latest }, 'confirmed')
-          if (confirmation.value.err) {
-            throw new Error(`${subject} failed on-chain: ${JSON.stringify(confirmation.value.err)}`)
-          }
+          // The ER block height does not track Solana base height, so the blockhash
+          // watchdog stays off here; the timeout covers expiry and retries re-sign.
+          await confirmSignatureHttp(erConnection, signature, null, 'confirmed', 45_000)
           return signature
         } catch (error) {
-          if (!isBlockhashFailure(error) || attempt >= 2) throw error
+          if (!(isBlockhashFailure(error) || errorMessage(error).toLowerCase().includes('timeout')) || attempt >= 4)
+            throw error
+          await wait(500)
         }
       }
 
@@ -504,7 +591,7 @@ export function useClaimSpotProgram() {
       // read endpoint cannot prevent a creator from obtaining devnet transaction fees.
       const faucetConnection = new Connection(clusterApiUrl('devnet'), 'confirmed')
       const signature = await faucetConnection.requestAirdrop(recipient, Math.round(amount * LAMPORTS_PER_SOL))
-      await faucetConnection.confirmTransaction(signature, 'confirmed')
+      await confirmSignatureHttp(faucetConnection, signature, null, 'confirmed')
       return signature
     },
     [requireWallet],
@@ -578,12 +665,12 @@ export function useClaimSpotProgram() {
           const live = (baseProgram.coder.accounts as any).decode('LiveAuction', data)
           onUpdate({
             liveAuction,
-            reservePrice: BigInt(live.reservePrice),
-            minIncrement: BigInt(live.minIncrement),
-            endsAt: BigInt(live.endsAt),
-            highestBid: BigInt(live.highestBid),
-            highestBidder: new PublicKey(live.highestBidder),
-            bidCount: BigInt(live.bidCount),
+            reservePrice: BigInt(live.reservePrice ?? live.reserve_price),
+            minIncrement: BigInt(live.minIncrement ?? live.min_increment),
+            endsAt: BigInt(live.endsAt ?? live.ends_at),
+            highestBid: BigInt(live.highestBid ?? live.highest_bid),
+            highestBidder: new PublicKey(live.highestBidder ?? live.highest_bidder),
+            bidCount: BigInt(live.bidCount ?? live.bid_count),
             closed: live.closed,
           })
         } catch {
@@ -629,6 +716,69 @@ export function useClaimSpotProgram() {
     [baseProgram.coder.accounts, routerConnection],
   )
 
+  const subscribeBidEvents = useCallback(
+    async (
+      auctions: Array<{ auction: PublicKey; liveAuction: PublicKey }>,
+      onBid: (event: LiveBidRealtimeEvent) => void,
+    ) => {
+      const uniqueAuctions = Array.from(
+        new Map(auctions.map((auction) => [auction.liveAuction.toBase58(), auction])).values(),
+      )
+      const statuses = await Promise.allSettled(
+        uniqueAuctions.map(async (auction) => ({
+          ...auction,
+          status: (await routerConnection.getDelegationStatus(auction.liveAuction)) as MagicBlockDelegationStatus,
+        })),
+      )
+      const auctionsByEndpoint = new Map<string, Set<string>>()
+      for (const result of statuses) {
+        if (result.status !== 'fulfilled' || !result.value.status.isDelegated || !result.value.status.fqdn) continue
+        const auctionKeys = auctionsByEndpoint.get(result.value.status.fqdn) ?? new Set<string>()
+        auctionKeys.add(result.value.auction.toBase58())
+        auctionsByEndpoint.set(result.value.status.fqdn, auctionKeys)
+      }
+
+      if (auctionsByEndpoint.size === 0) throw new Error('No delegated MagicBlock auction endpoint was found')
+
+      const listeners: Array<{ connection: Connection; id: number }> = []
+      for (const [endpoint, auctionKeys] of auctionsByEndpoint) {
+        const erConnection = new Connection(endpoint, 'processed')
+        const parser = new EventParser(CLAIMSPOT_PROGRAM_ID, baseProgram.coder)
+        const id = erConnection.onLogs(
+          CLAIMSPOT_PROGRAM_ID,
+          (result) => {
+            if (result.err) return
+            for (const parsed of parser.parseLogs(result.logs)) {
+              if (parsed.name !== 'BidPlaced') continue
+              const data = parsed.data as any
+              const auction = new PublicKey(data.auction)
+              if (!auctionKeys.has(auction.toBase58())) continue
+              onBid({
+                auction,
+                bidder: new PublicKey(data.bidder),
+                previousBidder: new PublicKey(data.previousBidder ?? data.previous_bidder),
+                amount: BigInt(data.amount),
+                bidCount: BigInt(data.bidCount ?? data.bid_count),
+                endsAt: BigInt(data.endsAt ?? data.ends_at),
+                signature: result.signature,
+                endpoint,
+              })
+            }
+          },
+          'processed',
+        )
+        listeners.push({ connection: erConnection, id })
+      }
+
+      return async () => {
+        await Promise.allSettled(
+          listeners.map(({ connection: erConnection, id }) => erConnection.removeOnLogsListener(id)),
+        )
+      }
+    },
+    [baseProgram.coder, routerConnection],
+  )
+
   const createAuction = useCallback(
     async (title: string, reserve: bigint, increment: bigint, durationSeconds: number) => {
       const creator = requireWallet()
@@ -639,7 +789,7 @@ export function useClaimSpotProgram() {
       const vault = vaultPda(auction)
       const endsAt = BigInt(Math.floor(Date.now() / 1000) + durationSeconds)
       const titleHash = await hashTitle(title)
-      await (baseProgram.methods as any)
+      const createIx = await (baseProgram.methods as any)
         .createAuction(
           new BN(auctionId.toString()),
           titleHash,
@@ -657,14 +807,15 @@ export function useClaimSpotProgram() {
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
         })
-        .rpc()
-      await (baseProgram.methods as any)
+        .instruction()
+      const delegateIx = await (baseProgram.methods as any)
         .delegateLiveAuction()
         .accountsPartial({ payer: creator, creator, auction, liveAuction, validator: null })
-        .rpc()
+        .instruction()
+      await signAndSendBaseTransaction(new Transaction().add(createIx, delegateIx), 'Auction creation')
       return auction
     },
-    [baseProgram.methods, requireMint, requireWallet],
+    [baseProgram.methods, requireMint, requireWallet, signAndSendBaseTransaction],
   )
 
   const createAndRegisterCampaignLots = useCallback(
@@ -731,6 +882,7 @@ export function useClaimSpotProgram() {
         const batch = prepared.slice(start, start + LOT_SIGNING_BATCH_SIZE)
         let completedInBatch = 0
         let blockhashRefreshes = 0
+        const maxBlockhashRefreshes = 6
 
         // Lot indexes must land in order. If wallet approval or earlier confirms
         // consume the blockhash lifetime, preserve completed lots and re-sign only
@@ -738,6 +890,29 @@ export function useClaimSpotProgram() {
         while (completedInBatch < batch.length) {
           const remaining = batch.slice(completedInBatch)
           const writeConnection = baseWriteConnections[blockhashRefreshes % baseWriteConnections.length]
+          const firstLot = startingIndex + start + completedInBatch + 1
+          const lastLot = startingIndex + start + batch.length
+
+          // Simulate the UNSIGNED transactions before spending a wallet approval.
+          // Program errors surface here without a popup, and no blockhash
+          // lifetime is burned while the user is reading the wallet prompt.
+          remaining.forEach(({ transaction }) => {
+            transaction.signatures = []
+            transaction.feePayer = creator
+          })
+          const routeSimulation = await writeConnection.simulateTransaction(remaining[0].transaction)
+          if (routeSimulation.value.err) {
+            if (isBlockhashFailure(routeSimulation.value.err) && blockhashRefreshes < maxBlockhashRefreshes) {
+              blockhashRefreshes += 1
+              await wait(300)
+              continue
+            }
+            throw new Error(
+              simulationFailureMessage(routeSimulation.value.err, routeSimulation.value.logs, 'Campaign lot batch'),
+            )
+          }
+
+          // Fetch the blockhash as late as possible: right before the popup.
           const latest = await writeConnection.getLatestBlockhash('confirmed')
           remaining.forEach(({ transaction }) => {
             transaction.signatures = []
@@ -745,18 +920,7 @@ export function useClaimSpotProgram() {
             transaction.recentBlockhash = latest.blockhash
             transaction.lastValidBlockHeight = latest.lastValidBlockHeight
           })
-          const routeSimulation = await writeConnection.simulateTransaction(remaining[0].transaction)
-          if (routeSimulation.value.err) {
-            if (isBlockhashFailure(routeSimulation.value.err) && blockhashRefreshes < 3) {
-              blockhashRefreshes += 1
-              continue
-            }
-            throw new Error(
-              simulationFailureMessage(routeSimulation.value.err, routeSimulation.value.logs, 'Campaign lot batch'),
-            )
-          }
-          const firstLot = startingIndex + start + completedInBatch + 1
-          const lastLot = startingIndex + start + batch.length
+
           onProgress?.(
             blockhashRefreshes > 0
               ? `Blockhash refreshed — approve remaining lots ${firstLot}–${lastLot}`
@@ -772,17 +936,18 @@ export function useClaimSpotProgram() {
             onProgress?.(`Confirming lot ${absoluteLot} of ${startingIndex + lots.length}`)
             try {
               const signature = await writeConnection.sendRawTransaction(signed[offset].serialize(), {
-                maxRetries: 5,
-                preflightCommitment: 'confirmed',
+                maxRetries: 8,
+                skipPreflight: true,
               })
-              const confirmation = await writeConnection.confirmTransaction({ signature, ...latest }, 'confirmed')
-              if (confirmation.value.err) {
-                throw new Error(`Lot ${absoluteLot} failed on-chain: ${JSON.stringify(confirmation.value.err)}`)
+              try {
+                await confirmSignatureHttp(writeConnection, signature, latest.lastValidBlockHeight, 'confirmed')
+              } catch (error) {
+                throw new Error(`Lot ${absoluteLot}: ${error instanceof Error ? error.message : 'confirmation failed'}`)
               }
               signatures.push(signature)
               completedInBatch += 1
             } catch (error) {
-              if (!isRetryableRpcFailure(error) || blockhashRefreshes >= 3) throw error
+              if (!isRetryableRpcFailure(error) || blockhashRefreshes >= maxBlockhashRefreshes) throw error
               blockhashRefreshes += 1
               refreshBlockhash = true
               break
@@ -816,17 +981,13 @@ export function useClaimSpotProgram() {
         authority,
       })
       .transaction()
-    const latest = await connection.getLatestBlockhash('confirmed')
-    transaction.feePayer = authority
-    transaction.recentBlockhash = latest.blockhash
-    transaction.partialSign(signer)
-    const signed = await wallet.signTransaction(transaction)
-    const createSignature = await connection.sendRawTransaction(signed.serialize(), { maxRetries: 5 })
-    await connection.confirmTransaction({ signature: createSignature, ...latest }, 'confirmed')
+    const createSignature = await signAndSendBaseTransaction(transaction, 'Bidding session creation', {
+      beforeSign: (tx) => tx.partialSign(signer),
+    })
     const session = { signer, token, authority, expiresAt, createSignature }
     setBidSession(session)
     return session
-  }, [connection, requireWallet, wallet])
+  }, [connection, requireWallet, signAndSendBaseTransaction, wallet])
 
   const revokeBidSession = useCallback(async () => {
     const authority = requireWallet()
@@ -842,15 +1003,10 @@ export function useClaimSpotProgram() {
         systemProgram: SystemProgram.programId,
       })
       .transaction()
-    const latest = await connection.getLatestBlockhash('confirmed')
-    transaction.feePayer = authority
-    transaction.recentBlockhash = latest.blockhash
-    const signed = await wallet.signTransaction(transaction)
-    const signature = await connection.sendRawTransaction(signed.serialize(), { maxRetries: 5 })
-    await connection.confirmTransaction({ signature, ...latest }, 'confirmed')
+    const signature = await signAndSendBaseTransaction(transaction, 'Bidding session revocation')
     setBidSession(null)
     return signature
-  }, [bidSession, connection, requireWallet, wallet])
+  }, [bidSession, connection, requireWallet, signAndSendBaseTransaction, wallet])
 
   const fundAndDelegateBid = useCallback(
     async (auction: ChainAuction, maxAmount: bigint) => {
@@ -896,25 +1052,8 @@ export function useClaimSpotProgram() {
         openIx,
         delegateIx,
       )
-      const latest = await connection.getLatestBlockhash('confirmed')
-      transaction.feePayer = bidder
-      transaction.recentBlockhash = latest.blockhash
-
-      // Phantom's sendTransaction path can collapse wallet/RPC failures into the
-      // unhelpful `WalletSendTransactionError: Unexpected error`. Simulate the
-      // complete base-layer transaction ourselves, then ask the wallet only to
-      // sign and submit the signed bytes through the configured RPC.
-      const simulation = await connection.simulateTransaction(transaction)
-      if (simulation.value.err) {
-        throw new Error(simulationFailureMessage(simulation.value.err, simulation.value.logs, 'Budget transaction'))
-      }
       if (!wallet.signTransaction) throw new Error('Connected wallet cannot sign this budget transaction')
-      const signed = await wallet.signTransaction(transaction)
-      const signature = await connection.sendRawTransaction(signed.serialize(), {
-        maxRetries: 5,
-        preflightCommitment: 'confirmed',
-      })
-      await connection.confirmTransaction({ signature, ...latest }, 'confirmed')
+      const signature = await signAndSendBaseTransaction(transaction, 'Bid budget')
 
       // A confirmed base-layer delegation can take a few seconds to appear in
       // the router and in the selected ER bank. Do not tell the UI that bidding
@@ -944,7 +1083,7 @@ export function useClaimSpotProgram() {
 
       return { bidEscrow, openSignature: signature, delegateSignature: signature, delegationReady }
     },
-    [baseProgram.methods, connection, requireMint, requireWallet, routerConnection, wallet],
+    [baseProgram.methods, connection, requireMint, requireWallet, routerConnection, signAndSendBaseTransaction, wallet],
   )
 
   const placeBid = useCallback(
@@ -966,7 +1105,7 @@ export function useClaimSpotProgram() {
             sessionToken: null,
           })
           .transaction()
-        return signAndSendRouterTransaction(transaction, 'MagicBlock bid')
+        return signAndSendErTransaction(transaction, auction.liveAuction, 'MagicBlock bid')
       }
 
       const transaction = await (routerProgram.methods as any)
@@ -980,18 +1119,23 @@ export function useClaimSpotProgram() {
           sessionToken: activeSession.token,
         })
         .transaction()
-      const latest = await routerConnection.getLatestBlockhash('confirmed')
+      const status = (await routerConnection.getDelegationStatus(auction.liveAuction)) as MagicBlockDelegationStatus
+      if (!status.isDelegated || !status.fqdn) throw new Error('The live auction is not delegated to MagicBlock')
+      const erConnection = new Connection(status.fqdn, 'confirmed')
+      const latest = await erConnection.getLatestBlockhash('confirmed')
       transaction.feePayer = activeSession.signer.publicKey
       transaction.recentBlockhash = latest.blockhash
       transaction.sign(activeSession.signer)
-      const signature = await routerConnection.sendRawTransaction(transaction.serialize(), {
+      const signature = await erConnection.sendRawTransaction(transaction.serialize(), {
         maxRetries: 5,
-        preflightCommitment: 'confirmed',
+        skipPreflight: true,
       })
-      await routerConnection.confirmTransaction({ signature, ...latest }, 'confirmed')
+      // Session bids are the latency-critical path: poll over HTTP instead of
+      // waiting on a websocket signature subscription.
+      await confirmSignatureHttp(erConnection, signature, null, 'confirmed', 20_000)
       return signature
     },
-    [bidSession, requireWallet, routerConnection, routerProgram.methods, signAndSendRouterTransaction],
+    [bidSession, requireWallet, routerConnection, routerProgram.methods, signAndSendErTransaction],
   )
 
   const fetchBidEscrow = useCallback(
@@ -1158,7 +1302,7 @@ export function useClaimSpotProgram() {
       const creator = requireWallet()
       const paymentMint = requireMint()
       const campaignLot = campaignLotPda(campaign, lotIndex)
-      const signature = await (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .registerCampaignLot(lotIndex, await hashText(placement), creativeRequired)
         .accounts({
           creator,
@@ -1168,10 +1312,11 @@ export function useClaimSpotProgram() {
           campaignLot,
           systemProgram: SystemProgram.programId,
         })
-        .rpc()
+        .transaction()
+      const signature = await signAndSendBaseTransaction(transaction, 'Campaign lot registration')
       return { campaignLot, signature }
     },
-    [baseProgram.methods, requireMint, requireWallet],
+    [baseProgram.methods, requireMint, requireWallet, signAndSendBaseTransaction],
   )
 
   const publishCampaign = useCallback(
@@ -1190,13 +1335,14 @@ export function useClaimSpotProgram() {
     async (auction: PublicKey, contentHash: number[]) => {
       const submitter = requireWallet()
       const creative = creativePda(auction, submitter)
-      const signature = await (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .submitCreative(contentHash)
         .accounts({ submitter, auction, creative, systemProgram: SystemProgram.programId })
-        .rpc()
+        .transaction()
+      const signature = await signAndSendBaseTransaction(transaction, 'Artwork submission')
       return { creative, signature }
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, requireWallet, signAndSendBaseTransaction],
   )
 
   const reviewCreative = useCallback(
@@ -1210,36 +1356,39 @@ export function useClaimSpotProgram() {
     ) => {
       const moderator = requireWallet()
       const reasonHash = approved ? new Array(32).fill(0) : await hashText(reason)
-      return (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .reviewCreative(approved, reasonHash)
         .accounts({ moderator, campaign, campaignLot, auction, creative })
-        .rpc()
+        .transaction()
+      return signAndSendBaseTransaction(transaction, 'Artwork review')
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, requireWallet, signAndSendBaseTransaction],
   )
 
   const submitProof = useCallback(
     async (auction: PublicKey, contentHash: number[]) => {
       const creator = requireWallet()
       const proof = proofPda(auction)
-      const signature = await (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .submitFulfillmentProof(contentHash)
         .accounts({ creator, auction, proof, systemProgram: SystemProgram.programId })
-        .rpc()
+        .transaction()
+      const signature = await signAndSendBaseTransaction(transaction, 'Fulfillment proof submission')
       return { proof, signature }
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, requireWallet, signAndSendBaseTransaction],
   )
 
   const reviewProof = useCallback(
     async (campaign: PublicKey, campaignLot: PublicKey, auction: PublicKey, proof: PublicKey, accepted: boolean) => {
       const winner = requireWallet()
-      return (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .reviewFulfillmentProof(accepted)
         .accounts({ winner, campaign, campaignLot, auction, proof })
-        .rpc()
+        .transaction()
+      return signAndSendBaseTransaction(transaction, 'Fulfillment proof review')
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, requireWallet, signAndSendBaseTransaction],
   )
 
   const closeAuction = useCallback(
@@ -1256,9 +1405,9 @@ export function useClaimSpotProgram() {
               : null,
         })
         .transaction()
-      return signAndSendRouterTransaction(transaction, 'Auction close and return')
+      return signAndSendErTransaction(transaction, auction.liveAuction, 'Auction close and return')
     },
-    [requireWallet, routerProgram.methods, signAndSendRouterTransaction],
+    [requireWallet, routerProgram.methods, signAndSendErTransaction],
   )
 
   const undelegateMyBid = useCallback(
@@ -1268,20 +1417,22 @@ export function useClaimSpotProgram() {
         .undelegateBidEscrow()
         .accounts({ bidder, auction, bidEscrow: bidEscrowPda(auction, bidder) })
         .transaction()
-      return signAndSendRouterTransaction(transaction, 'Bid escrow return')
+      const bidEscrow = bidEscrowPda(auction, bidder)
+      return signAndSendErTransaction(transaction, bidEscrow, 'Bid escrow return')
     },
-    [requireWallet, routerProgram.methods, signAndSendRouterTransaction],
+    [requireWallet, routerProgram.methods, signAndSendErTransaction],
   )
 
   const finalizeNoBid = useCallback(
     async (auction: ChainAuction) => {
       const payer = requireWallet()
-      return (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .finalizeNoBidAuction()
         .accounts({ payer, auction: auction.publicKey, liveAuction: auction.liveAuction })
-        .rpc()
+        .transaction()
+      return signAndSendBaseTransaction(transaction, 'Auction finalization')
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, requireWallet, signAndSendBaseTransaction],
   )
 
   const finalizeAuction = useCallback(
@@ -1289,7 +1440,7 @@ export function useClaimSpotProgram() {
       const payer = requireWallet()
       if (auction.highestBidder.equals(PublicKey.default)) throw new Error('Auction has no winner')
       const winnerTokens = getAssociatedTokenAddressSync(auction.paymentMint, auction.highestBidder)
-      return (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .finalizeAuction()
         .accounts({
           payer,
@@ -1308,9 +1459,10 @@ export function useClaimSpotProgram() {
             auction.paymentMint,
           ),
         ])
-        .rpc()
+        .transaction()
+      return signAndSendBaseTransaction(transaction, 'Auction settlement')
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, requireWallet, signAndSendBaseTransaction],
   )
 
   const releasePayment = useCallback(
@@ -1323,7 +1475,16 @@ export function useClaimSpotProgram() {
     ) => {
       const payer = requireWallet()
       const creatorTokens = getAssociatedTokenAddressSync(auction.paymentMint, auction.creator)
-      return (baseProgram.methods as any)
+      const settlementReceipt = receiptPda(auction.publicKey)
+      const receiptChecks = await Promise.allSettled(
+        baseWriteConnections.map((writeConnection) => writeConnection.getAccountInfo(settlementReceipt, 'confirmed')),
+      )
+      if (receiptChecks.some((result) => result.status === 'fulfilled' && result.value !== null)) {
+        // Payment release is intentionally one-shot. Treat an existing receipt
+        // as success so a stale UI or double click cannot submit `init` twice.
+        return undefined
+      }
+      const transaction = await (baseProgram.methods as any)
         .releasePayment()
         .accounts({
           payer,
@@ -1336,23 +1497,24 @@ export function useClaimSpotProgram() {
           proof,
           vault: auction.vault,
           creatorTokens,
-          receipt: receiptPda(auction.publicKey),
+          receipt: settlementReceipt,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
         .preInstructions([
           createAssociatedTokenAccountIdempotentInstruction(payer, creatorTokens, auction.creator, auction.paymentMint),
         ])
-        .rpc()
+        .transaction()
+      return signAndSendBaseTransaction(transaction, 'Payment release')
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, baseWriteConnections, requireWallet, signAndSendBaseTransaction],
   )
 
   const claimRefund = useCallback(
     async (auction: ChainAuction) => {
       const bidder = requireWallet()
       const bidderTokens = getAssociatedTokenAddressSync(auction.paymentMint, bidder)
-      return (baseProgram.methods as any)
+      const transaction = await (baseProgram.methods as any)
         .claimRefund()
         .accounts({
           bidder,
@@ -1366,9 +1528,10 @@ export function useClaimSpotProgram() {
         .preInstructions([
           createAssociatedTokenAccountIdempotentInstruction(bidder, bidderTokens, bidder, auction.paymentMint),
         ])
-        .rpc()
+        .transaction()
+      return signAndSendBaseTransaction(transaction, 'Refund claim')
     },
-    [baseProgram.methods, requireWallet],
+    [baseProgram.methods, requireWallet, signAndSendBaseTransaction],
   )
 
   return {
@@ -1380,6 +1543,7 @@ export function useClaimSpotProgram() {
     fetchSolBalance,
     fetchAuctions,
     subscribeLiveAuctions,
+    subscribeBidEvents,
     createAuction,
     createAndRegisterCampaignLots,
     bidSession,
