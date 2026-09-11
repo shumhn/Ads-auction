@@ -5,12 +5,13 @@ import { ArrowLeft, ExternalLink, Radio, Wifi, WifiOff } from 'lucide-react'
 import Link from 'next/link'
 import { PublicKey } from '@solana/web3.js'
 import { useEffect, useMemo, useState } from 'react'
-import { AuctionPanel, LiveSpot, MachineBoard } from '@/components/claimspot/live-auction'
+import { AuctionPanel, BidHistoryTable, LiveSpot, MachineBoard } from '@/components/claimspot/live-auction'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { Button } from '@/components/ui/button'
 import { shortAddress, SPOT_METADATA } from '@/lib/claimspot'
 import { CampaignMetadata } from '@/lib/campaign-metadata'
 import { ChainAuction, useClaimSpotProgram } from '@/lib/claimspot-program'
+import { useLiveBidFeed } from '@/lib/use-live-bid-feed'
 import { useLiveAuctionStream } from '@/lib/use-live-auction-stream'
 
 function bytesToHex(bytes: number[]) {
@@ -127,6 +128,7 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
   const effectiveSelectedAuction = selectedAuction ?? liveSpots[0]?.chain?.publicKey.toBase58() ?? null
   const selected =
     liveSpots.find((spot) => spot.chain?.publicKey.toBase58() === effectiveSelectedAuction) ?? liveSpots[0] ?? null
+  const bidFeed = useLiveBidFeed(selected?.chain ?? null, program.subscribeBidEvents, liveStream.status)
   const escrowQuery = useQuery({
     queryKey: ['claimspot-public-escrow', selected?.chain?.publicKey.toBase58(), program.wallet.publicKey?.toBase58()],
     enabled: Boolean(selected?.chain && program.wallet.publicKey),
@@ -159,6 +161,12 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
     copy?.details ??
     'This campaign is live on devnet. Its original presentation metadata is unavailable, but every auction state below is read directly from the Atrium.ads auction program.'
   const liveCount = liveSpots.filter((spot) => spot.chain && statusLabel(spot.chain).startsWith('Live')).length
+  const campaignProofs = chainQuery.data.proofs.filter((proof) =>
+    liveSpots.some((spot) => spot.chain?.publicKey.equals(proof.auction)),
+  )
+  const finishedSpots = liveSpots.filter(
+    (spot) => spot.chain && (spot.chain.status === 'settled' || spot.chain.closed || Number(spot.chain.endsAt) <= now),
+  )
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-4 py-8 text-black sm:px-6 lg:px-8 lg:py-12">
@@ -275,32 +283,91 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
           </div>
         )}
 
-        {chainQuery.data.proofs.length > 0 && (
+        {selected?.chain && (
+          <div className="mt-8">
+            <BidHistoryTable
+              records={bidFeed.records}
+              realtimeStatus={bidFeed.status}
+              loading={bidFeed.historyLoading}
+            />
+          </div>
+        )}
+
+        {finishedSpots.length > 0 && (
           <section className="mt-8 rounded-3xl border border-black/10 bg-white p-5 sm:p-7">
-            <p className="text-xs font-black uppercase tracking-[0.14em] text-neutral-500">Fulfilment ledger</p>
-            <h2 className="mt-2 text-2xl font-black tracking-[-0.04em]">Proof after placement</h2>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {chainQuery.data.proofs
-                .filter((proof) => liveSpots.some((spot) => spot.chain?.publicKey.equals(proof.auction)))
-                .map((proof) => (
-                  <a
-                    key={proof.publicKey.toBase58()}
-                    href={`/api/uploads/${bytesToHex(proof.contentHash)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-2xl border border-black/10 p-4 transition-colors hover:bg-neutral-50"
-                  >
-                    <span className="flex flex-wrap items-center justify-between gap-2 text-xs font-black uppercase tracking-wide text-neutral-500">
-                      <span>{proof.status}</span>
-                      <span>
-                        {chainQuery.data.receipts.some((receipt) => receipt.auction.equals(proof.auction))
-                          ? 'USDC paid'
-                          : 'Payment in vault'}
-                      </span>
-                    </span>
-                    <span className="mt-2 block font-bold">View creator proof ↗</span>
-                  </a>
-                ))}
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-neutral-500">After the auction</p>
+            <h2 className="mt-2 text-2xl font-black tracking-[-0.04em]">Delivery &amp; proof</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              Creator placement evidence and escrow payment status appear here after bidding closes.
+            </p>
+            <div className="mt-5 overflow-x-auto rounded-xl border border-black/10">
+              <table className="w-full min-w-[680px] border-collapse text-left text-sm">
+                <thead className="border-b border-black/10 bg-surface-soft font-mono text-[11px] uppercase tracking-[0.1em] text-neutral-500">
+                  <tr>
+                    <th className="px-4 py-3">Lot</th>
+                    <th className="px-4 py-3">Auction</th>
+                    <th className="px-4 py-3">Delivery proof</th>
+                    <th className="px-4 py-3">Payment</th>
+                    <th className="px-4 py-3 text-right">Evidence</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-black/10">
+                  {finishedSpots.map((spot) => {
+                    const auction = spot.chain!
+                    const proof = campaignProofs.find((candidate) => candidate.auction.equals(auction.publicKey))
+                    const paid = chainQuery.data.receipts.some((receipt) => receipt.auction.equals(auction.publicKey))
+                    const hasWinner = !auction.winner.equals(PublicKey.default) || auction.bidCount > 0n
+                    return (
+                      <tr key={auction.publicKey.toBase58()}>
+                        <td className="px-4 py-3.5 font-bold">{spot.name}</td>
+                        <td className="px-4 py-3.5 text-neutral-600">
+                          {auction.status === 'settled'
+                            ? hasWinner
+                              ? 'Winner locked'
+                              : 'Closed · no bids'
+                            : auction.closed
+                              ? 'Ready to lock winner'
+                              : 'Close ER result'}
+                        </td>
+                        <td className="px-4 py-3.5 font-semibold capitalize text-neutral-600">
+                          {auction.status !== 'settled'
+                            ? hasWinner
+                              ? 'Available after winner lock'
+                              : 'Not required'
+                            : proof
+                              ? proof.status
+                              : hasWinner
+                                ? 'Awaiting creator proof'
+                                : 'Not required'}
+                        </td>
+                        <td className="px-4 py-3.5 font-semibold">
+                          {paid
+                            ? 'USDC paid'
+                            : hasWinner
+                              ? auction.status === 'settled'
+                                ? 'Payment in vault'
+                                : 'Bid held in vault'
+                              : 'No payment'}
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          {proof ? (
+                            <a
+                              href={`/api/uploads/${bytesToHex(proof.contentHash)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex min-h-10 items-center gap-1 font-bold underline decoration-neutral-300 underline-offset-4 hover:text-neutral-600 focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black"
+                            >
+                              View proof <ExternalLink className="size-3.5" aria-hidden="true" />
+                            </a>
+                          ) : (
+                            <span className="text-neutral-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           </section>
         )}
