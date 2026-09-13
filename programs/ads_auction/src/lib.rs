@@ -443,7 +443,14 @@ pub mod ads_auction {
     }
 
     /// Final ER step: commit the shared result and winning escrow together.
-    /// Losing bid escrows return independently when their owners claim refunds.
+    /// A creator-bound session key may sign this ER transaction, which avoids
+    /// requiring wallets to classify a MagicBlock ER blockhash as a base-chain
+    /// Solana transaction. Losing bid escrows return independently when their
+    /// owners claim refunds.
+    #[session_auth_or(
+        ctx.accounts.live_auction.creator == ctx.accounts.payer.key(),
+        SessionError::InvalidToken
+    )]
     pub fn close_and_undelegate(ctx: Context<CloseAndUndelegate>) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         require!(
@@ -930,7 +937,7 @@ pub struct PlaceBid<'info> {
 }
 
 #[commit]
-#[derive(Accounts)]
+#[derive(Accounts, Session)]
 pub struct CloseAndUndelegate<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
@@ -938,6 +945,8 @@ pub struct CloseAndUndelegate<'info> {
     pub live_auction: Account<'info, LiveAuction>,
     #[account(mut)]
     pub winner_bid: Option<Account<'info, BidEscrow>>,
+    #[session(signer = payer, authority = live_auction.creator)]
+    pub session_token: Option<Account<'info, SessionTokenV2>>,
 }
 
 #[commit]

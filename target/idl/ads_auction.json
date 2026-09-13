@@ -87,7 +87,10 @@
       "name": "close_and_undelegate",
       "docs": [
         "Final ER step: commit the shared result and winning escrow together.",
-        "Losing bid escrows return independently when their owners claim refunds."
+        "A creator-bound session key may sign this ER transaction, which avoids",
+        "requiring wallets to classify a MagicBlock ER blockhash as a base-chain",
+        "Solana transaction. Losing bid escrows return independently when their",
+        "owners claim refunds."
       ],
       "discriminator": [
         32,
@@ -112,6 +115,10 @@
         {
           "name": "winner_bid",
           "writable": true,
+          "optional": true
+        },
+        {
+          "name": "session_token",
           "optional": true
         },
         {

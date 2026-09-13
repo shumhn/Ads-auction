@@ -194,29 +194,70 @@ export const LAPTOP_LAYOUT_PRESETS: LaptopLayoutPreset[] = [
   { id: 'full-22', name: 'Full 22', description: 'Maximum inventory', spots: createSpots() },
 ]
 
+function reindexSpots(spots: SpotMetadata[]) {
+  return spots.map((spot, index) => ({ ...spot, id: index + 1, auctionId: index + 1 }))
+}
+
+const smallCustomLayouts: Record<number, SpotMetadata[]> = {
+  1: [layoutSpot(1, 'Top marquee', 'P', 17, 7, 66, 27)],
+  2: [layoutSpot(1, 'Top marquee', 'P', 17, 7, 66, 23), layoutSpot(2, 'Bottom marquee', 'P', 17, 70, 66, 23)],
+  3: [
+    layoutSpot(1, 'Top marquee', 'P', 17, 7, 66, 23),
+    layoutSpot(2, 'Bottom left', 'L', 5, 69, 43, 24),
+    layoutSpot(3, 'Bottom right', 'L', 52, 69, 43, 24),
+  ],
+  4: [
+    layoutSpot(1, 'Top left', 'L', 5, 7, 41, 25),
+    layoutSpot(2, 'Top right', 'L', 54, 7, 41, 25),
+    layoutSpot(3, 'Bottom left', 'L', 5, 68, 41, 25),
+    layoutSpot(4, 'Bottom right', 'L', 54, 68, 41, 25),
+  ],
+  5: [
+    layoutSpot(1, 'Top marquee', 'P', 22, 7, 56, 23),
+    layoutSpot(2, 'Middle left', 'L', 5, 35, 24, 30),
+    layoutSpot(3, 'Middle right', 'L', 71, 35, 24, 30),
+    layoutSpot(4, 'Bottom left', 'M', 22, 71, 26, 22),
+    layoutSpot(5, 'Bottom right', 'M', 52, 71, 26, 22),
+  ],
+  6: [
+    layoutSpot(1, 'Top left', 'L', 5, 7, 43, 23),
+    layoutSpot(2, 'Top right', 'L', 52, 7, 43, 23),
+    layoutSpot(3, 'Middle left', 'M', 5, 35, 22, 30),
+    layoutSpot(4, 'Middle right', 'M', 73, 35, 22, 30),
+    layoutSpot(5, 'Bottom left', 'L', 5, 70, 43, 23),
+    layoutSpot(6, 'Bottom right', 'L', 52, 70, 43, 23),
+  ],
+  8: [
+    layoutSpot(1, 'Top left', 'L', 5, 7, 28, 23),
+    layoutSpot(2, 'Top centre', 'P', 36, 7, 28, 23),
+    layoutSpot(3, 'Top right', 'L', 67, 7, 28, 23),
+    layoutSpot(4, 'Middle left', 'M', 5, 35, 22, 30),
+    layoutSpot(5, 'Middle right', 'M', 73, 35, 22, 30),
+    layoutSpot(6, 'Bottom left', 'S', 5, 70, 28, 23),
+    layoutSpot(7, 'Bottom centre', 'M', 36, 70, 28, 23),
+    layoutSpot(8, 'Bottom right', 'S', 67, 70, 28, 23),
+  ],
+}
+
+// Full inventory is revealed in balanced pairs around the reserved centre mark.
+// This keeps every intermediate custom count looking like a deliberate laptop
+// composition instead of a generic spreadsheet grid.
+const fullLayoutRevealOrder = [1, 4, 19, 22, 2, 3, 20, 21, 10, 13, 7, 16, 11, 12, 5, 9, 14, 18, 6, 8, 15, 17]
+
 export function customLaptopLayout(count: number): SpotMetadata[] {
   const safeCount = Math.min(22, Math.max(1, Math.trunc(count)))
-  const columns = safeCount <= 2 ? safeCount : safeCount <= 6 ? 3 : safeCount <= 12 ? 4 : 5
-  const rows = Math.ceil(safeCount / columns)
-  const gap = 2
-  const width = (90 - gap * (columns - 1)) / columns
-  const height = (86 - gap * (rows - 1)) / rows
+  if (safeCount === 7) return reindexSpots(classicSeven)
+  if (safeCount === 9) return reindexSpots(gridNine)
+  if (smallCustomLayouts[safeCount]) return reindexSpots(smallCustomLayouts[safeCount])
 
-  return Array.from({ length: safeCount }, (_, index) => {
-    const row = Math.floor(index / columns)
-    const column = index % columns
-    const size: SpotMetadata['size'] =
-      width * height > 900 ? 'P' : width * height > 500 ? 'L' : width * height > 280 ? 'M' : 'S'
-    return layoutSpot(
-      index + 1,
-      `Spot ${index + 1}`,
-      size,
-      5 + column * (width + gap),
-      6 + row * (height + gap),
-      width,
-      height,
-    )
-  })
+  const fullLayout = createSpots()
+  const byId = new Map(fullLayout.map((spot) => [spot.id, spot]))
+  return reindexSpots(
+    fullLayoutRevealOrder
+      .slice(0, safeCount)
+      .map((id) => byId.get(id))
+      .filter((spot): spot is SpotMetadata => Boolean(spot)),
+  )
 }
 
 export function suggestedSpotPrice(size: SpotMetadata['size']) {

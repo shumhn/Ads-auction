@@ -66,7 +66,11 @@ export function CampaignMarketplace({ variant = 'preview' }: { variant?: 'previe
     },
   })
 
-  const liveStream = useLiveAuctionStream(marketplaceQuery.data?.auctions ?? [], program.subscribeLiveAuctions)
+  const liveStream = useLiveAuctionStream(
+    marketplaceQuery.data?.auctions ?? [],
+    program.subscribeLiveAuctions,
+    program.readLiveAuctions,
+  )
 
   const campaignCards = useMemo(() => {
     const data = marketplaceQuery.data
@@ -257,7 +261,7 @@ export function CampaignMarketplace({ variant = 'preview' }: { variant?: 'previe
                     </h3>
                     <p className="mt-2 text-sm font-semibold text-neutral-500">
                       {surface
-                        ? `${surface.model} · ${surface.fulfillmentMode === 'laser-etch' ? 'laser etched' : 'sticker'}`
+                        ? `${surface.model} · ${surface.fulfillmentMode === 'laser-etch' ? 'laser etched' : 'sticker'}${surface.displayDurationDays ? ` · ${surface.displayDurationDays} days` : ''}`
                         : `Creator ${shortAddress(card.campaign.creator.toBase58())}`}
                     </p>
                     <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-lg bg-black/10">

@@ -24,10 +24,11 @@ export enum ClusterNetwork {
 export const defaultClusters: SolanaCluster[] = [
   {
     name: 'devnet',
-    // MagicBlock recommends its Solana RPC as the base-layer endpoint for
-    // account initialization, delegation, and settlement. Keep the metered
-    // Helius endpoint available to server-side indexing instead of using its
-    // load-balanced browser path for wallet transaction blockhashes.
+    // Creation, delegation and settlement happen on Solana Devnet. Keep the
+    // configured MagicBlock base RPC consistent for blockhash, preflight and
+    // confirmation. NEXT_PUBLIC_SOLANA_RPC is intentionally not used here:
+    // that variable is also consumed by server-side indexing and a stale or
+    // mainnet value must never leak into wallet transaction construction.
     endpoint: process.env.NEXT_PUBLIC_MAGIC_BASE_RPC ?? 'https://rpc.magicblock.app/devnet',
     network: ClusterNetwork.Devnet,
   },

@@ -93,7 +93,10 @@ export type AdsAuction = {
       "name": "closeAndUndelegate",
       "docs": [
         "Final ER step: commit the shared result and winning escrow together.",
-        "Losing bid escrows return independently when their owners claim refunds."
+        "A creator-bound session key may sign this ER transaction, which avoids",
+        "requiring wallets to classify a MagicBlock ER blockhash as a base-chain",
+        "Solana transaction. Losing bid escrows return independently when their",
+        "owners claim refunds."
       ],
       "discriminator": [
         32,
@@ -118,6 +121,10 @@ export type AdsAuction = {
         {
           "name": "winnerBid",
           "writable": true,
+          "optional": true
+        },
+        {
+          "name": "sessionToken",
           "optional": true
         },
         {

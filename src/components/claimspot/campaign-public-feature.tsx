@@ -13,6 +13,7 @@ import { CampaignMetadata } from '@/lib/campaign-metadata'
 import { ChainAuction, useClaimSpotProgram } from '@/lib/claimspot-program'
 import { useLiveBidFeed } from '@/lib/use-live-bid-feed'
 import { useLiveAuctionStream } from '@/lib/use-live-auction-stream'
+import { useLeaderBrandProfiles } from '@/lib/use-leader-brand-profiles'
 
 function bytesToHex(bytes: number[]) {
   return bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -83,8 +84,9 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
       .map((lot) => chain.auctionByAddress.get(lot.auction.toBase58()))
       .filter((auction): auction is ChainAuction => Boolean(auction))
   }, [chainQuery.data])
-  const liveStream = useLiveAuctionStream(campaignAuctions, program.subscribeLiveAuctions)
+  const liveStream = useLiveAuctionStream(campaignAuctions, program.subscribeLiveAuctions, program.readLiveAuctions)
   const streamedAuctions = liveStream.auctions
+  const leaderBrands = useLeaderBrandProfiles(streamedAuctions)
   const streamedAuctionByAddress = useMemo(
     () => new Map(streamedAuctions.map((auction) => [auction.publicKey.toBase58(), auction])),
     [streamedAuctions],
@@ -101,13 +103,17 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
       const metadata = copyByAuction.get(auctionAddress)
       const fallbackGeometry = SPOT_METADATA[index] ?? SPOT_METADATA[SPOT_METADATA.length - 1]!
       const geometry = metadata?.geometry ? { ...fallbackGeometry, ...metadata.geometry } : fallbackGeometry
-      const approvedCreative = chain.creatives.find(
+      const recordedLogo = chain.creatives.find(
         (creative) =>
           creative.auction.equals(lot.auction) &&
-          creative.status === 'approved' &&
           Boolean(auction) &&
           creative.submitter.equals(auction!.status === 'settled' ? auction!.winner : auction!.highestBidder),
       )
+      const leaderWallet =
+        auction && auction.bidCount > 0n
+          ? (auction.status === 'settled' ? auction.winner : auction.highestBidder).toBase58()
+          : null
+      const brand = leaderWallet ? leaderBrands.data?.[leaderWallet] : null
       return {
         id: index + 1,
         auctionId: auction ? Number(auction.auctionId) : index + 1,
@@ -120,10 +126,16 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
         dimensions: geometry.dimensions,
         deliverable: metadata?.placement ?? geometry.deliverable,
         chain: auction,
-        artworkUrl: approvedCreative ? `/api/uploads/${bytesToHex(approvedCreative.contentHash)}` : null,
+        artworkUrl: recordedLogo
+          ? `/api/uploads/${bytesToHex(recordedLogo.contentHash)}`
+          : brand
+            ? `/api/uploads/${brand.logoHash}`
+            : null,
+        artworkKind: recordedLogo?.status === 'approved' ? 'approved' : recordedLogo || brand ? 'leader-preview' : null,
+        brandName: brand?.name ?? null,
       }
     })
-  }, [chainQuery.data, copyQuery.data, streamedAuctionByAddress])
+  }, [chainQuery.data, copyQuery.data, streamedAuctionByAddress, leaderBrands.data])
 
   const effectiveSelectedAuction = selectedAuction ?? liveSpots[0]?.chain?.publicKey.toBase58() ?? null
   const selected =
@@ -227,6 +239,10 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
                 {copy.surface.model} · {copy.surface.finish} ·{' '}
                 {copy.surface.fulfillmentMode === 'laser-etch' ? 'laser etched' : 'sticker placement'} ·{' '}
                 {copy.surface.imageHash ? 'creator photo' : 'Atrium.ads template'}
+                {copy.surface.displayDurationDays ? ` · ${copy.surface.displayDurationDays}-day display` : ''}
+                {copy.surface.placementStartWithinDays
+                  ? ` · starts within ${copy.surface.placementStartWithinDays} days of approval`
+                  : ''}
               </span>
             )}
           </div>
@@ -278,6 +294,7 @@ export function CampaignPublicFeature({ campaignAddress }: { campaignAddress: st
                 escrowLoading={escrowQuery.isLoading}
                 now={now}
                 onRefresh={() => chainQuery.refetch()}
+                campaignAddress={validAddress ?? undefined}
               />
             )}
           </div>

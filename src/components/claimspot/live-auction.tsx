@@ -29,8 +29,16 @@ import {
 } from '@/lib/claimspot'
 import { useLiveAuctionStream } from '@/lib/use-live-auction-stream'
 import { BidRecord, useLiveBidFeed } from '@/lib/use-live-bid-feed'
+import { brandProfileMessage, fetchBrandProfiles } from '@/lib/brand-profile'
+import { useLeaderBrandProfiles } from '@/lib/use-leader-brand-profiles'
 
-export type LiveSpot = SpotMetadata & { chain: ChainAuction | null; artworkUrl?: string | null; draftPrice?: number }
+export type LiveSpot = SpotMetadata & {
+  chain: ChainAuction | null
+  artworkUrl?: string | null
+  artworkKind?: 'approved' | 'leader-preview' | null
+  brandName?: string | null
+  draftPrice?: number
+}
 
 function minimumBid(auction: ChainAuction) {
   return auction.bidCount === 0n ? auction.reservePrice : auction.highestBid + auction.minIncrement
@@ -110,7 +118,7 @@ export function MachineBoard({
             <button
               key={spot.id}
               type="button"
-              aria-label={`${spot.name}${value === null ? ', not published' : `, ${hasBid ? 'top bid' : 'reserve'} ${formatUsdc(value)} devnet USDC`}`}
+              aria-label={`${spot.name}${value === null ? ', not published' : `, ${hasBid ? 'top bid' : 'reserve'} ${formatUsdc(value)} devnet USDC`}${spot.artworkKind === 'leader-preview' ? `, unreviewed live logo for ${spot.brandName}` : ''}`}
               onClick={() => onSelect(spot.auctionId)}
               className={`absolute flex min-h-10 flex-col items-center justify-center overflow-hidden rounded-md border px-1 text-center transition-transform duration-150 active:scale-[0.98] focus-visible:z-20 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/30 sm:rounded-lg ${
                 selected
@@ -122,12 +130,23 @@ export function MachineBoard({
               style={{ left: `${spot.x}%`, top: `${spot.y}%`, width: `${spot.width}%`, height: `${spot.height}%` }}
             >
               {spot.artworkUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={spot.artworkUrl}
-                  alt={`${spot.name} approved artwork`}
-                  className="size-full object-contain p-1"
-                />
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={spot.artworkUrl}
+                    alt={
+                      spot.artworkKind === 'leader-preview'
+                        ? `${spot.brandName ?? 'Leading brand'} logo`
+                        : `${spot.name} approved winner logo`
+                    }
+                    className="size-full object-contain p-1"
+                  />
+                  {spot.artworkKind === 'leader-preview' && (
+                    <span className="absolute bottom-0 inset-x-0 truncate bg-black/80 px-1 py-0.5 text-[7px] font-bold text-white sm:text-[9px]">
+                      Live leader · {spot.brandName}
+                    </span>
+                  )}
+                </>
               ) : builder ? (
                 <>
                   <span className="font-mono text-[8px] font-black uppercase tracking-[0.08em] sm:text-[10px]">
@@ -356,25 +375,120 @@ export function AuctionPanel({
   escrowLoading,
   now,
   onRefresh,
+  campaignAddress,
 }: {
   spot: LiveSpot
   escrow: ChainBidEscrow | null | undefined
   escrowLoading: boolean
   now: number
   onRefresh: () => Promise<unknown>
+  campaignAddress?: string
 }) {
-  const { wallet, requestDevnetUsdc, fundAndDelegateBid, placeBid, bidSession, createBidSession, revokeBidSession } =
-    useClaimSpotProgram()
+  const {
+    wallet,
+    requestDevnetUsdc,
+    fundAndDelegateBid,
+    placeBid,
+    submitCreative,
+    fetchCreativeLogoHash,
+    bidSession,
+    bidSessionRestoring,
+    bidSessionStorageAvailable,
+    createBidSession,
+    revokeBidSession,
+  } = useClaimSpotProgram()
   const { getExplorerUrl } = useCluster()
   const queryClient = useQueryClient()
   const chain = spot.chain
   const minBid = chain ? fromUsdcAtoms(minimumBid(chain)) : 0
   const [budget, setBudget] = useState(() => formatUsdc(minBid))
-  const [amount, setAmount] = useState(() => formatUsdc(minBid))
-  const [pending, setPending] = useState<'faucet' | 'budget' | 'session' | 'bid' | null>(null)
+  const [customAmount, setCustomAmount] = useState<string | null>(null)
+  // Follow the live next-valid bid until the bidder deliberately enters more.
+  // Keeping this derived avoids stale inputs without resetting the whole panel.
+  const amount = customAmount ?? formatUsdc(minBid)
+  const [pending, setPending] = useState<'faucet' | 'budget' | 'session' | 'brand' | 'logo' | 'bid' | null>(null)
+  const [brandName, setBrandName] = useState('')
+  const [logoFile, setLogoFile] = useState<File | null>(null)
+  const walletAddress = wallet.publicKey?.toBase58() ?? null
+  const brandQuery = useQuery({
+    queryKey: ['brand-profiles', walletAddress ?? ''],
+    queryFn: () => fetchBrandProfiles(walletAddress ? [walletAddress] : []),
+    enabled: Boolean(walletAddress),
+    staleTime: 5_000,
+  })
+  const savedBrand = walletAddress ? brandQuery.data?.[walletAddress] : null
   const sessionActive = Boolean(
     bidSession && wallet.publicKey && bidSession.authority.equals(wallet.publicKey) && bidSession.expiresAt > now,
   )
+
+  function renderBrandProfileCard() {
+    return (
+      <div className="rounded-md border border-black/10 bg-surface-soft p-3">
+        <p className="text-xs font-black uppercase tracking-[0.1em]">Your primary brand logo</p>
+        <p className="mt-1 text-xs leading-5 text-neutral-600">
+          Set once for your wallet. During setup, its hash is recorded for this lot in the same transaction as your bid
+          limit—no separate logo transaction later.
+        </p>
+        {brandQuery.isPending ? (
+          <p className="mt-3 flex items-center gap-2 text-xs text-neutral-600">
+            <LoaderCircle className="size-3 animate-spin" /> Loading brand profile…
+          </p>
+        ) : brandQuery.isError ? (
+          <button
+            type="button"
+            onClick={() => brandQuery.refetch()}
+            className="mt-3 text-xs font-bold text-red-700 underline"
+          >
+            Could not load brand profile. Retry
+          </button>
+        ) : savedBrand ? (
+          <div className="mt-3 flex items-center gap-3 rounded-md border border-black/10 bg-white p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`/api/uploads/${savedBrand.logoHash}`}
+              alt={`${savedBrand.name} primary logo`}
+              className="size-12 rounded border border-black/10 object-contain"
+            />
+            <span className="text-sm font-bold">{savedBrand.name}</span>
+          </div>
+        ) : (
+          <div className="mt-3 grid gap-3">
+            <div>
+              <label htmlFor="bid-brand-name" className="text-xs font-bold">
+                Brand name
+              </label>
+              <Input
+                id="bid-brand-name"
+                value={brandName}
+                onChange={(event) => setBrandName(event.target.value)}
+                maxLength={60}
+                placeholder="Your brand"
+                className="mt-1 h-10 bg-white"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="bid-brand-logo" className="text-xs font-bold">
+                Primary logo (required)
+              </label>
+              <Input
+                id="bid-brand-logo"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)}
+                className="mt-1 h-auto min-h-10 bg-white py-2 text-xs"
+                required
+              />
+              <p className="mt-1 text-[11px] text-neutral-500">
+                PNG, JPG or WebP · max 5 MB. A one-time message signature verifies that this brand belongs to your
+                wallet.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   async function requestDevnetTokens() {
     if (!wallet.publicKey) return
@@ -395,6 +509,42 @@ export function AuctionPanel({
     }
   }
 
+  async function ensureBrandProfile() {
+    if (brandQuery.isError || brandQuery.isPending) {
+      throw new Error('Wait for your brand profile to load, then retry')
+    }
+    if (!wallet.publicKey) throw new Error('Connect your wallet first')
+    if (savedBrand) return savedBrand.logoHash
+
+    const name = brandName.trim()
+    if (!name || name.length > 60) throw new Error('Enter a brand name (up to 60 characters)')
+    if (!logoFile) throw new Error('Choose your primary brand logo first')
+    if (!wallet.signMessage) {
+      throw new Error('This wallet cannot verify a brand profile. Connect a wallet with message signing.')
+    }
+    setPending('brand')
+    const form = new FormData()
+    form.set('file', logoFile)
+    const uploaded = await fetch('/api/uploads', { method: 'POST', body: form })
+    const uploadBody = (await uploaded.json()) as { hash?: string; error?: string }
+    if (!uploaded.ok || !uploadBody.hash) throw new Error(uploadBody.error ?? 'Logo upload failed')
+    const logoHash = uploadBody.hash
+    const timestamp = Date.now()
+    const message = brandProfileMessage(wallet.publicKey.toBase58(), name, logoHash, timestamp)
+    const signed = await wallet.signMessage(new TextEncoder().encode(message))
+    const signature = btoa(String.fromCharCode(...signed))
+    const response = await fetch('/api/brands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet: wallet.publicKey.toBase58(), name, logoHash, timestamp, signature }),
+    })
+    const saved = (await response.json()) as { error?: string }
+    if (!response.ok) throw new Error(saved.error ?? 'Brand profile could not be saved')
+    setLogoFile(null)
+    await queryClient.invalidateQueries({ queryKey: ['brand-profiles'] })
+    return logoHash
+  }
+
   async function lockBudget() {
     if (!chain) return
     const value = Number(budget)
@@ -403,12 +553,19 @@ export function AuctionPanel({
       return
     }
     try {
+      const logoHash = await ensureBrandProfile()
       setPending('budget')
-      const result = await fundAndDelegateBid(chain, toUsdcAtoms(value))
-      toast.success(result.delegationReady ? 'Real devnet budget ready' : 'Real devnet budget locked', {
+      const recordedLogoHash = await fetchCreativeLogoHash(chain.publicKey, wallet.publicKey!)
+      if (recordedLogoHash && recordedLogoHash !== logoHash) {
+        throw new Error('This lot already has a different recorded logo. Use the logo from your first setup.')
+      }
+      const logoBytes = logoHash.match(/.{2}/g)!.map((byte) => Number.parseInt(byte, 16))
+      const result = await fundAndDelegateBid(chain, toUsdcAtoms(value), logoBytes)
+      queryClient.setQueryData(['auction-logo', chain.publicKey.toBase58(), wallet.publicKey!.toBase58()], logoHash)
+      toast.success(result.delegationReady ? 'Bid limit ready' : 'USDC deposited on Solana', {
         description: result.delegationReady
-          ? `Escrow ${shortAddress(result.bidEscrow.toBase58())} is live on MagicBlock.`
-          : `Escrow ${shortAddress(result.bidEscrow.toBase58())} is confirming on MagicBlock. Bidding unlocks automatically.`,
+          ? `Budget and logo recorded together. Escrow ${shortAddress(result.bidEscrow.toBase58())} is live on MagicBlock.`
+          : `Budget and logo recorded together. Escrow ${shortAddress(result.bidEscrow.toBase58())} is confirming on MagicBlock.`,
       })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['claimspot-public-escrow'] }),
@@ -434,8 +591,33 @@ export function AuctionPanel({
       return
     }
     try {
+      if (!wallet.publicKey) throw new Error('Connect your wallet to bid')
+      const logoKey = ['auction-logo', chain.publicKey.toBase58(), wallet.publicKey.toBase58()]
+      const recordedLogoHash = await queryClient.fetchQuery({
+        queryKey: logoKey,
+        queryFn: () => fetchCreativeLogoHash(chain.publicKey, wallet.publicKey!),
+        staleTime: 60_000,
+      })
+      const activeLogoHash = await ensureBrandProfile()
+      if (!activeLogoHash) throw new Error('Choose your primary brand logo before bidding')
+      if (recordedLogoHash && recordedLogoHash !== activeLogoHash) {
+        throw new Error('This lot already has a different recorded logo. Use the logo from your first bid.')
+      }
+      if (!recordedLogoHash) {
+        setPending('logo')
+        const logoBytes = activeLogoHash.match(/.{2}/g)!.map((byte) => Number.parseInt(byte, 16))
+        const recorded = await submitCreative(chain.publicKey, logoBytes)
+        queryClient.setQueryData(logoKey, activeLogoHash)
+        toast.success('Your logo is recorded for this lot', {
+          action: {
+            label: 'Transaction',
+            onClick: () => window.open(getExplorerUrl(`tx/${recorded.signature}`), '_blank', 'noopener,noreferrer'),
+          },
+        })
+      }
       setPending('bid')
       const signature = await placeBid(chain, toUsdcAtoms(value))
+      setCustomAmount(null)
       toast.success('Bid accepted by MagicBlock', {
         action: {
           label: 'Transaction',
@@ -468,7 +650,9 @@ export function AuctionPanel({
       } else {
         const session = await createBidSession()
         toast.success('One-click bids enabled for one hour', {
-          description: 'The temporary key can only place bids as this wallet; it cannot move USDC or settle auctions.',
+          description: session.persisted
+            ? 'Restores automatically after reload in this browser. The key can only place bids for this wallet.'
+            : 'Active in this tab, but browser storage is unavailable. You will need to enable it again after reload.',
           action: {
             label: 'Transaction',
             onClick: () =>
@@ -497,12 +681,12 @@ export function AuctionPanel({
   }
 
   const isOpen = chain.status === 'live' && !chain.closed && Number(chain.endsAt) > now
-  const walletAddress = wallet.publicKey?.toBase58() ?? null
   const isCreator = walletAddress === chain.creator.toBase58()
   const isLeader = chain.bidCount > 0n && walletAddress === chain.highestBidder.toBase58()
   const isWinner = chain.status === 'settled' && walletAddress === chain.winner.toBase58()
   const resultBidder = chain.status === 'settled' ? chain.winner : chain.highestBidder
   const hasResultBidder = chain.bidCount > 0n && !resultBidder.equals(PublicKey.default)
+  const manageHref = campaignAddress ? `/manage?campaign=${encodeURIComponent(campaignAddress)}` : '/manage'
 
   const endedMessage = (() => {
     if (chain.status === 'settled') {
@@ -510,14 +694,14 @@ export function AuctionPanel({
         return {
           title: 'You won this placement',
           detail:
-            'Continue the artwork and delivery-review workflow. Your winning payment remains protected in escrow.',
+            'Confirm your saved bid logo, then review the creator’s placement photo. Your payment remains protected in escrow.',
           action: 'Continue winner workflow',
         }
       }
       if (isCreator) {
         return {
           title: 'Winner locked on Solana',
-          detail: 'Continue with artwork approval, placement delivery and proof before releasing payment.',
+          detail: 'Review the winner’s bid logo, place it, and upload a photo before payment can be released.',
           action: 'Continue delivery workflow',
         }
       }
@@ -535,16 +719,31 @@ export function AuctionPanel({
       }
     }
     if (isCreator) {
+      const campaignAction = campaignAddress ? 'Finish this campaign' : 'Finalize auction'
+      if (!hasResultBidder) {
+        return chain.closed
+          ? {
+              title: 'Empty result returned to Solana',
+              detail: 'This spot received no bids. Mark it complete—there is no winner, payment, or delivery step.',
+              action: campaignAction,
+            }
+          : {
+              title: 'Bidding ended with no bids',
+              detail:
+                'Return this empty MagicBlock result to Solana, then mark the spot complete. No winner is involved.',
+              action: campaignAction,
+            }
+      }
       return chain.closed
         ? {
             title: 'ER result returned to Solana',
             detail: 'The live state is committed. Lock the winner and return any unused winning budget next.',
-            action: 'Lock winner',
+            action: campaignAction,
           }
         : {
-            title: 'Bidding ended — finalize the result',
+            title: campaignAddress ? 'Bidding ended — finish this campaign' : 'Bidding ended — finalize the result',
             detail: 'Close the MagicBlock auction and return the final bid state to Solana before locking the winner.',
-            action: 'Finalize auction',
+            action: campaignAction,
           }
     }
     if (isLeader) {
@@ -626,8 +825,14 @@ export function AuctionPanel({
         </div>
       </dl>
 
+      {spot.artworkKind === 'leader-preview' && spot.brandName && (
+        <p className="mt-3 text-xs font-semibold text-neutral-600">
+          Live leader: {spot.brandName} · Logo awaits approval if this bid wins
+        </p>
+      )}
+
       <p className="mt-5 text-sm leading-6 text-neutral-600">
-        {spot.deliverable}. Artwork approval and physical fulfilment are creator responsibilities in this devnet
+        {spot.deliverable}. Winner logo approval and physical fulfilment are creator responsibilities in this devnet
         release.
       </p>
 
@@ -654,24 +859,39 @@ export function AuctionPanel({
                 <span className="font-mono font-black">{shortAddress(resultBidder.toBase58())}</span>
               </div>
             )}
-            <ol className="mt-4 grid gap-2 border-l border-black/15 pl-4 text-xs leading-5 text-neutral-600">
-              <li>
-                <span className="font-black text-black">1. Commit result</span> — return final auction state from
-                MagicBlock ER.
-              </li>
-              <li>
-                <span className="font-black text-black">2. Lock winner</span> — confirm the highest bidder and amount on
-                Solana.
-              </li>
-              <li>
-                <span className="font-black text-black">3. Complete delivery</span> — approved creative, placement
-                proof, winner review and payment.
-              </li>
-            </ol>
+            {chain.status === 'settled' && !hasResultBidder ? (
+              <p className="mt-4 text-xs leading-5 text-neutral-600">
+                This empty spot is complete. There is no winner, escrow payment, or delivery proof to collect.
+              </p>
+            ) : (
+              <ol className="mt-4 grid gap-2 border-l border-black/15 pl-4 text-xs leading-5 text-neutral-600">
+                <li>
+                  <span className="font-black text-black">1. Commit result</span> — return final auction state from
+                  MagicBlock ER.
+                </li>
+                {hasResultBidder ? (
+                  <>
+                    <li>
+                      <span className="font-black text-black">2. Lock winner</span> — confirm the highest bidder and
+                      amount on Solana.
+                    </li>
+                    <li>
+                      <span className="font-black text-black">3. Complete delivery</span> — approve the winning logo,
+                      place it, upload photo proof, then get winner review and payment.
+                    </li>
+                  </>
+                ) : (
+                  <li>
+                    <span className="font-black text-black">2. Mark spot complete</span> — finalize the no-bid result on
+                    Solana. No winner or delivery step follows.
+                  </li>
+                )}
+              </ol>
+            )}
             <div className="mt-4 flex flex-wrap gap-2">
               {endedMessage.action && (
                 <Button asChild className="min-h-10 bg-black text-white hover:bg-black/80">
-                  <Link href="/manage">{endedMessage.action}</Link>
+                  <Link href={manageHref}>{endedMessage.action}</Link>
                 </Button>
               )}
               <Button asChild variant="outline" className="min-h-10 bg-white">
@@ -681,7 +901,9 @@ export function AuctionPanel({
           </div>
         ) : !wallet.connected ? (
           <div>
-            <p className="mb-3 text-sm text-neutral-600">Connect a Solana devnet wallet to lock a budget and bid.</p>
+            <p className="mb-3 text-sm text-neutral-600">
+              Connect a Solana devnet wallet to deposit a bid limit and bid.
+            </p>
             <WalletButton />
           </div>
         ) : escrowLoading ? (
@@ -689,64 +911,89 @@ export function AuctionPanel({
             <LoaderCircle className="size-4 animate-spin" /> Reading your on-chain escrow…
           </div>
         ) : !escrow ? (
-          <div>
-            <label htmlFor="budget" className="text-sm font-bold">
-              1. Lock maximum budget
-            </label>
-            <p className="mt-1 text-xs leading-5 text-neutral-500">
-              Shared devnet USDC moves into this lot&apos;s Solana vault, then your bid account is delegated.
-            </p>
-            <button
-              type="button"
-              onClick={requestDevnetTokens}
-              disabled={pending !== null}
-              className="mt-1 inline-flex min-h-10 items-center gap-1 text-xs font-bold underline decoration-neutral-300 underline-offset-4 focus-visible:rounded focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/20 disabled:opacity-50"
-            >
-              {pending === 'faucet' && <LoaderCircle className="size-3 animate-spin" />}
-              Get 1,000 test USDC from the shared devnet faucet
-            </button>
-            <div className="mt-3 flex gap-2">
-              <div className="relative flex-1">
-                <Input
-                  id="budget"
-                  type="text"
-                  autoComplete="off"
-                  inputMode="decimal"
-                  value={budget}
-                  onChange={(event) => setBudget(event.target.value)}
-                  className="h-11 pr-16 font-mono"
-                />
-                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-neutral-500">
-                  USDC
-                </span>
-              </div>
-              <Button
-                onClick={lockBudget}
+          <div className="grid gap-4">
+            <div>
+              <p className="text-sm font-bold">1. Confirm your brand</p>
+              <div className="mt-2">{renderBrandProfileCard()}</div>
+            </div>
+            <div>
+              <label htmlFor="budget" className="text-sm font-bold">
+                2. Set your bid limit and enable bidding
+              </label>
+              <p className="mt-1 text-xs leading-5 text-neutral-500">
+                This is not a bid. Your test USDC stays in this lot&apos;s Solana vault while MagicBlock handles fast
+                bids up to this amount. After the auction is finalized, losing bidders can claim a full refund; the
+                winner gets any unused amount back.
+              </p>
+              <button
+                type="button"
+                onClick={requestDevnetTokens}
                 disabled={pending !== null}
-                className="h-11 rounded-md bg-black px-5 text-white"
+                className="mt-1 inline-flex min-h-10 items-center gap-1 text-xs font-bold underline decoration-neutral-300 underline-offset-4 focus-visible:rounded focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/20 disabled:opacity-50"
               >
-                {pending === 'budget' ? <LoaderCircle className="size-4 animate-spin" /> : 'Lock budget'}
-              </Button>
+                {pending === 'faucet' && <LoaderCircle className="size-3 animate-spin" />}
+                Get 1,000 test USDC from the shared devnet faucet
+              </button>
+              <div className="mt-3 flex gap-2">
+                <div className="relative flex-1">
+                  <Input
+                    id="budget"
+                    type="text"
+                    autoComplete="off"
+                    inputMode="decimal"
+                    value={budget}
+                    onChange={(event) => setBudget(event.target.value)}
+                    className="h-11 pr-16 font-mono"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-neutral-500">
+                    USDC
+                  </span>
+                </div>
+                <Button
+                  onClick={lockBudget}
+                  disabled={pending !== null || brandQuery.isPending || brandQuery.isError}
+                  className="h-11 rounded-md bg-black px-5 text-white"
+                >
+                  {pending === 'brand' ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" /> Verifying brand…
+                    </>
+                  ) : pending === 'budget' ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" /> Setting up…
+                    </>
+                  ) : (
+                    'Save setup & enable bids'
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         ) : (
           <div>
             <div className="mb-3 flex items-center justify-between rounded-md bg-surface-soft px-3 py-2 text-xs">
-              <span className="font-semibold text-neutral-600">MagicBlock bid budget</span>
+              <span className="font-semibold text-neutral-600">Your bid limit · held on Solana</span>
               <span className="font-black tabular-nums">{formatUsdc(fromUsdcAtoms(escrow.deposited))} USDC</span>
             </div>
             <label htmlFor="bid-amount" className="text-sm font-bold">
-              2. Place real-time bid
+              3. Place real-time bid
             </label>
+            {!savedBrand && <div className="mt-3">{renderBrandProfileCard()}</div>}
             <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-black/10 bg-white px-3 py-2.5">
               <div>
                 <p className="flex items-center gap-1.5 text-xs font-bold">
                   <Zap className="size-3.5" /> One-click bids
                 </p>
                 <p className="mt-0.5 text-[11px] leading-4 text-neutral-500">
-                  {sessionActive
-                    ? 'Active for this tab; bids need no wallet popup.'
-                    : 'One wallet approval enables bids for 1 hour.'}
+                  {bidSessionRestoring
+                    ? 'Checking your saved one-click session…'
+                    : sessionActive
+                      ? bidSessionStorageAvailable
+                        ? 'Active; restores after reload in this browser until it expires.'
+                        : 'Active for this tab; browser storage is unavailable.'
+                      : bidSessionStorageAvailable
+                        ? 'Optional: one approval removes wallet popups for bids for 1 hour.'
+                        : 'Browser storage is unavailable. One-click bids will need re-enabling after reload.'}
                 </p>
               </div>
               <Button
@@ -754,10 +1001,10 @@ export function AuctionPanel({
                 variant="outline"
                 size="sm"
                 onClick={toggleBidSession}
-                disabled={pending !== null || !escrow.delegated}
+                disabled={pending !== null || bidSessionRestoring || !escrow.delegated}
                 className="shrink-0 rounded-md"
               >
-                {pending === 'session' ? (
+                {pending === 'session' || bidSessionRestoring ? (
                   <LoaderCircle className="size-3.5 animate-spin" />
                 ) : sessionActive ? (
                   'Revoke'
@@ -774,7 +1021,7 @@ export function AuctionPanel({
                   autoComplete="off"
                   inputMode="decimal"
                   value={amount}
-                  onChange={(event) => setAmount(event.target.value)}
+                  onChange={(event) => setCustomAmount(event.target.value)}
                   className="h-11 pr-16 font-mono"
                 />
                 <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-neutral-500">
@@ -783,11 +1030,29 @@ export function AuctionPanel({
               </div>
               <Button
                 onClick={submitBid}
-                disabled={pending !== null || !escrow.delegated}
+                disabled={
+                  pending !== null ||
+                  bidSessionRestoring ||
+                  !escrow.delegated ||
+                  brandQuery.isPending ||
+                  brandQuery.isError
+                }
                 className="h-11 rounded-md bg-signal px-5 text-black hover:bg-signal/80"
               >
-                {pending === 'bid' ? (
-                  <LoaderCircle className="size-4 animate-spin" />
+                {pending === 'brand' ? (
+                  <>
+                    <LoaderCircle className="size-4 animate-spin" /> Saving logo…
+                  </>
+                ) : pending === 'logo' ? (
+                  <>
+                    <LoaderCircle className="size-4 animate-spin" /> Recording logo…
+                  </>
+                ) : pending === 'bid' ? (
+                  <>
+                    <LoaderCircle className="size-4 animate-spin" /> Placing bid…
+                  </>
+                ) : !savedBrand ? (
+                  'Save logo & bid'
                 ) : sessionActive ? (
                   'Bid instantly'
                 ) : (
@@ -809,7 +1074,8 @@ export function AuctionPanel({
 }
 
 export function LiveAuction() {
-  const { fetchAuctions, fetchBidEscrow, subscribeLiveAuctions, subscribeBidEvents, wallet } = useClaimSpotProgram()
+  const { fetchAuctions, fetchBidEscrow, readLiveAuctions, subscribeLiveAuctions, subscribeBidEvents, wallet } =
+    useClaimSpotProgram()
   const { getExplorerUrl } = useCluster()
   const [selectedAuctionId, setSelectedAuctionId] = useState(FEATURED_AUCTION_IDS[0])
   const [view, setView] = useState<'auction' | 'result'>('auction')
@@ -830,12 +1096,27 @@ export function LiveAuction() {
   const { auctions: streamedAuctions, status: accountStreamStatus } = useLiveAuctionStream(
     auctionsQuery.data ?? [],
     subscribeLiveAuctions,
+    readLiveAuctions,
   )
+  const leaderBrands = useLeaderBrandProfiles(streamedAuctions)
 
   const spots = useMemo<LiveSpot[]>(() => {
     const byId = new Map(streamedAuctions.map((auction) => [Number(auction.auctionId), auction]))
-    return SPOT_METADATA.map((spot) => ({ ...spot, chain: byId.get(spot.auctionId) ?? null }))
-  }, [streamedAuctions])
+    return SPOT_METADATA.map((spot) => {
+      const chain = byId.get(spot.auctionId) ?? null
+      const brand =
+        chain && chain.bidCount > 0n
+          ? leaderBrands.data?.[(chain.status === 'settled' ? chain.winner : chain.highestBidder).toBase58()]
+          : null
+      return {
+        ...spot,
+        chain,
+        artworkUrl: brand ? `/api/uploads/${brand.logoHash}` : null,
+        artworkKind: brand ? ('leader-preview' as const) : null,
+        brandName: brand?.name ?? null,
+      }
+    })
+  }, [streamedAuctions, leaderBrands.data])
 
   const selected = spots.find((spot) => spot.auctionId === selectedAuctionId) ?? spots[0]
   const bidFeed = useLiveBidFeed(selected?.chain ?? null, subscribeBidEvents, accountStreamStatus)
@@ -967,7 +1248,7 @@ export function LiveAuction() {
                 />
               </div>
               <AuctionPanel
-                key={`${selected.chain?.publicKey.toBase58() ?? `unpublished-${selected.id}`}-${selected.chain ? minimumBid(selected.chain).toString() : '0'}`}
+                key={selected.chain?.publicKey.toBase58() ?? `unpublished-${selected.id}`}
                 spot={selected}
                 escrow={escrowQuery.data}
                 escrowLoading={escrowQuery.isLoading}
