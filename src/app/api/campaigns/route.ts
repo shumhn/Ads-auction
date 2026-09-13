@@ -105,6 +105,12 @@ export async function POST(request: Request) {
         !body.surface.model?.trim() ||
         !body.surface.finish?.trim() ||
         !['sticker', 'laser-etch'].includes(body.surface.fulfillmentMode) ||
+        (body.surface.displayDurationDays !== undefined &&
+          (![1, 7, 14, 30].includes(Number(body.surface.displayDurationDays)) ||
+            !Number.isInteger(Number(body.surface.displayDurationDays)))) ||
+        (body.surface.placementStartWithinDays !== undefined &&
+          (![1, 3, 7].includes(Number(body.surface.placementStartWithinDays)) ||
+            !Number.isInteger(Number(body.surface.placementStartWithinDays)))) ||
         !['template', 'photo'].includes(source) ||
         (source === 'photo' && !/^[a-f0-9]{64}$/.test(body.surface.imageHash ?? '')) ||
         (source === 'template' && Boolean(body.surface.imageHash))
@@ -139,6 +145,12 @@ export async function POST(request: Request) {
             model: body.surface.model.slice(0, 120),
             finish: body.surface.finish.slice(0, 80),
             fulfillmentMode: body.surface.fulfillmentMode,
+            ...(body.surface.displayDurationDays
+              ? { displayDurationDays: Number(body.surface.displayDurationDays) }
+              : {}),
+            ...(body.surface.placementStartWithinDays
+              ? { placementStartWithinDays: Number(body.surface.placementStartWithinDays) }
+              : {}),
             source: body.surface.source ?? (body.surface.imageHash ? 'photo' : 'template'),
             ...(body.surface.imageHash ? { imageHash: body.surface.imageHash } : {}),
           }

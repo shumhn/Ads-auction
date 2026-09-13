@@ -7,7 +7,35 @@ import { WalletButton } from '@/components/solana/solana-provider'
 import { Button } from '@/components/ui/button'
 import { CampaignMetadata } from '@/lib/campaign-metadata'
 import { shortAddress } from '@/lib/claimspot'
-import { useClaimSpotProgram } from '@/lib/claimspot-program'
+import { ChainAuction, ChainCampaign, ChainCampaignLot, useClaimSpotProgram } from '@/lib/claimspot-program'
+
+type CampaignLifecycle = {
+  label: 'Draft' | 'Live' | 'Ended — finalize' | 'Settled'
+  endedLots: number
+}
+
+function campaignLifecycle(
+  campaign: ChainCampaign,
+  lots: ChainCampaignLot[],
+  auctions: ChainAuction[],
+): CampaignLifecycle {
+  if (campaign.status === 'draft') return { label: 'Draft', endedLots: 0 }
+
+  const auctionKeys = new Set(
+    lots.filter((lot) => lot.campaign.equals(campaign.publicKey)).map((lot) => lot.auction.toBase58()),
+  )
+  const campaignAuctions = auctions.filter((auction) => auctionKeys.has(auction.publicKey.toBase58()))
+  const now = Math.floor(Date.now() / 1_000)
+  const endedLots = campaignAuctions.filter(
+    (auction) => auction.status !== 'settled' && (auction.closed || Number(auction.endsAt) <= now),
+  ).length
+
+  if (campaignAuctions.length > 0 && campaignAuctions.every((auction) => auction.status === 'settled')) {
+    return { label: 'Settled', endedLots: 0 }
+  }
+  if (endedLots > 0) return { label: 'Ended — finalize', endedLots }
+  return { label: 'Live', endedLots: 0 }
+}
 
 export function MyAuctionsFeature() {
   const program = useClaimSpotProgram()
@@ -17,19 +45,29 @@ export function MyAuctionsFeature() {
     queryKey: ['claimspot-my-auctions', walletAddress],
     enabled: Boolean(walletAddress),
     retry: 1,
+    refetchInterval: 15_000,
     queryFn: async () => {
-      const [campaigns, metadataResponse] = await Promise.all([
-        program.fetchCampaigns(),
+      if (!program.wallet.publicKey) return []
+      const [campaigns, lots, auctions, metadataResult] = await Promise.all([
+        program.fetchCampaignsForCreator(program.wallet.publicKey),
+        program.fetchCampaignLots(),
+        program.fetchAuctionsForCreator(program.wallet.publicKey),
         fetch('/api/campaigns', { cache: 'no-store' }),
       ])
-      if (!metadataResponse.ok) throw new Error('Campaign details could not be loaded')
-      const metadata = ((await metadataResponse.json()) as { campaigns: CampaignMetadata[] }).campaigns
+      // Presentation copy is helpful, but the creator's on-chain inventory must
+      // still load if this local metadata file is temporarily unavailable.
+      const metadata = metadataResult.ok
+        ? ((await metadataResult.json()) as { campaigns: CampaignMetadata[] }).campaigns
+        : []
       const metadataByCampaign = new Map(metadata.map((item) => [item.campaign, item]))
 
       return campaigns
-        .filter((campaign) => campaign.creator.toBase58() === walletAddress)
         .sort((left, right) => Number(right.createdAt - left.createdAt))
-        .map((campaign) => ({ campaign, metadata: metadataByCampaign.get(campaign.publicKey.toBase58()) }))
+        .map((campaign) => ({
+          campaign,
+          metadata: metadataByCampaign.get(campaign.publicKey.toBase58()),
+          lifecycle: campaignLifecycle(campaign, lots, auctions),
+        }))
     },
   })
 
@@ -90,13 +128,13 @@ export function MyAuctionsFeature() {
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {campaignsQuery.data?.map(({ campaign, metadata }) => {
+              {campaignsQuery.data?.map(({ campaign, metadata, lifecycle }) => {
                 const address = campaign.publicKey.toBase58()
                 return (
                   <article key={address} className="flex min-h-56 flex-col rounded-xl border bg-card p-5">
                     <div className="flex items-start justify-between gap-4">
                       <span className="font-mono rounded-full bg-surface-soft px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em]">
-                        {campaign.status}
+                        {lifecycle.label}
                       </span>
                       <span className="text-xs font-semibold text-ink-muted">{campaign.lotCount} spots</span>
                     </div>
@@ -113,7 +151,11 @@ export function MyAuctionsFeature() {
                         </Link>
                       </Button>
                       <Button asChild size="sm" variant="outline">
-                        <Link href="/manage">Manage workflow</Link>
+                        <Link href={`/manage?campaign=${encodeURIComponent(address)}`}>
+                          {lifecycle.endedLots > 0
+                            ? `Finalize ${lifecycle.endedLots} spot${lifecycle.endedLots === 1 ? '' : 's'}`
+                            : 'Manage workflow'}
+                        </Link>
                       </Button>
                     </div>
                   </article>

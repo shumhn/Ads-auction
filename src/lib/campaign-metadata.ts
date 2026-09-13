@@ -5,6 +5,10 @@ export type LaptopSurfaceMetadata = {
   model: string
   finish: string
   fulfillmentMode: LaptopFulfillmentMode
+  /** Number of days the winning placement remains visible. */
+  displayDurationDays?: number
+  /** Number of days after artwork approval before placement begins. */
+  placementStartWithinDays?: number
   source?: 'template' | 'photo'
   imageHash?: string
 }
@@ -68,6 +72,8 @@ export function campaignDetailsCommitment(details: string, surface?: LaptopSurfa
       model: surface.model.trim(),
       finish: surface.finish.trim(),
       fulfillmentMode: surface.fulfillmentMode,
+      ...(surface.displayDurationDays ? { displayDurationDays: surface.displayDurationDays } : {}),
+      ...(surface.placementStartWithinDays ? { placementStartWithinDays: surface.placementStartWithinDays } : {}),
       source: surface.source ?? (surface.imageHash ? 'photo' : 'template'),
       ...(surface.imageHash ? { imageHash: surface.imageHash } : {}),
     },

@@ -2,6 +2,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  AlertCircle,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -19,15 +20,23 @@ import {
 import Image from 'next/image'
 import Link from 'next/link'
 import { PublicKey } from '@solana/web3.js'
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { LiveSpot, MachineBoard } from '@/components/claimspot/live-auction'
 import { WalletButton } from '@/components/solana/solana-provider'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { ChainAuction, ChainCampaign, hashText, useClaimSpotProgram } from '@/lib/claimspot-program'
 import { CampaignDraftMetadata, CampaignMetadata, campaignDetailsCommitment } from '@/lib/campaign-metadata'
+import { fetchBrandProfiles } from '@/lib/brand-profile'
 import {
   customLaptopLayout,
   formatUsdc,
@@ -48,6 +57,15 @@ type LotDraft = {
   geometry: SpotMetadata
 }
 type DurationUnit = 'minutes' | 'hours' | 'days'
+type PublishProofStatus = 'queued' | 'preparing' | 'signing' | 'confirming' | 'confirmed' | 'failed'
+type PublishProof = {
+  id: string
+  label: string
+  detail: string
+  status: PublishProofStatus
+  signature?: string
+  account?: string
+}
 const MAX_LOTS = 22
 const MAX_DURATION_SECONDS = 30 * 86_400
 const DURATION_UNITS: Record<DurationUnit, number> = {
@@ -61,6 +79,8 @@ const DURATION_PRESETS = [
   { label: '1 day', value: '1', unit: 'days' },
   { label: '7 days', value: '7', unit: 'days' },
 ] as const
+const DISPLAY_DURATION_OPTIONS = [1, 7, 14, 30] as const
+const PLACEMENT_START_OPTIONS = [1, 3, 7] as const
 const BUILDER_STEPS = [
   { label: 'Spots', description: 'Map the inventory' },
   { label: 'Campaign', description: 'Set the promise' },
@@ -155,15 +175,22 @@ function ImageTransaction({
   pending: boolean
   onSubmit: (file: File) => Promise<void>
 }) {
+  const inputId = useId()
   const [file, setFile] = useState<File | null>(null)
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Input
-        className="max-w-xs"
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-      />
+    <div className="flex flex-wrap items-end gap-2">
+      <div>
+        <label htmlFor={inputId} className="mb-1 block text-xs font-bold">
+          {label === 'Upload proof' ? 'Placement photo' : 'Primary logo'}
+        </label>
+        <Input
+          id={inputId}
+          className="max-w-xs"
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        />
+      </div>
       <Button disabled={!file || pending} onClick={() => file && onSubmit(file)}>
         {pending ? <LoaderCircle className="animate-spin" /> : <ImageUp />}
         {label}
@@ -172,18 +199,38 @@ function ImageTransaction({
   )
 }
 
-export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operations' }) {
+export function StudioFeature({
+  mode = 'create',
+  campaignAddress,
+}: {
+  mode?: 'create' | 'operations'
+  campaignAddress?: string
+}) {
   const program = useClaimSpotProgram()
   const queryClient = useQueryClient()
   const walletAddress = program.wallet.publicKey?.toBase58() ?? null
+  const brandQuery = useQuery({
+    queryKey: ['brand-profiles', walletAddress ?? ''],
+    queryFn: () => fetchBrandProfiles(walletAddress ? [walletAddress] : []),
+    enabled: mode === 'operations' && Boolean(walletAddress),
+    staleTime: 5_000,
+  })
+  const savedBrand = walletAddress ? brandQuery.data?.[walletAddress] : null
   const [title, setTitle] = useState('')
   const [details, setDetails] = useState('')
   const [moderator, setModerator] = useState('')
   const [durationValue, setDurationValue] = useState('7')
   const [durationUnit, setDurationUnit] = useState<DurationUnit>('days')
+  const [displayDurationDays, setDisplayDurationDays] = useState(7)
+  const [placementStartWithinDays, setPlacementStartWithinDays] = useState(3)
   const [layoutId, setLayoutId] = useState<LaptopLayoutId | 'custom'>('classic-7')
   const [lots, setLots] = useState<LotDraft[]>(() => draftLots(LAPTOP_LAYOUT_PRESETS[0].spots))
   const [customLotCount, setCustomLotCount] = useState('7')
+  const customPreviewCount = Number(customLotCount)
+  const customPreviewSpots = useMemo(
+    () => customLaptopLayout(Number.isFinite(customPreviewCount) && customPreviewCount >= 1 ? customPreviewCount : 7),
+    [customPreviewCount],
+  )
   const [selectedLot, setSelectedLot] = useState(0)
   const [builderStep, setBuilderStep] = useState('Ready')
   const [pending, setPending] = useState<string | null>(null)
@@ -192,10 +239,36 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
   const [legacyRecovery, setLegacyRecovery] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
   const [draftManagerOpen, setDraftManagerOpen] = useState(false)
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false)
+  const [publishProofs, setPublishProofs] = useState<PublishProof[]>([])
+  const [publishedCampaignKey, setPublishedCampaignKey] = useState<string | null>(null)
+  const [publishError, setPublishError] = useState<string | null>(null)
 
   const chainQuery = useQuery({
-    queryKey: ['claimspot-studio-chain', walletAddress],
+    queryKey: ['claimspot-studio-chain', mode, walletAddress],
     queryFn: async () => {
+      // Campaign creation only needs draft reconciliation and a fee balance.
+      // Loading every auction, ER account, escrow, creative and proof here used
+      // to put 100+ unrelated RPC reads directly in front of the first wallet
+      // request. The operations page retains the complete protocol query.
+      if (mode === 'create') {
+        const [campaigns, campaignLots, solBalance] = await Promise.all([
+          program.fetchCampaigns(),
+          program.fetchCampaignLots(),
+          program.fetchSolBalance(),
+        ])
+        return {
+          campaigns,
+          campaignLots,
+          creatives: [],
+          proofs: [],
+          receipts: [],
+          auctions: [],
+          escrowEntries: [],
+          solBalance,
+        }
+      }
+
       const [campaigns, campaignLots, creatives, proofs, receipts, auctions, undelegatedEscrows, solBalance] =
         await Promise.all([
           program.fetchCampaigns(),
@@ -259,6 +332,20 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
     () => new Map((data?.campaigns ?? []).map((campaign) => [campaign.publicKey.toBase58(), campaign])),
     [data?.campaigns],
   )
+  const campaignScopeAddress = mode === 'operations' && campaignAddress?.trim() ? campaignAddress.trim() : null
+  const scopedCampaign = campaignScopeAddress ? (campaignByKey.get(campaignScopeAddress) ?? null) : null
+  const scopedCampaignLots = useMemo(
+    () =>
+      campaignScopeAddress
+        ? (data?.campaignLots ?? []).filter((lot) => lot.campaign.toBase58() === campaignScopeAddress)
+        : [],
+    [campaignScopeAddress, data?.campaignLots],
+  )
+  const scopedAuctionKeys = useMemo(
+    () => new Set(scopedCampaignLots.map((lot) => lot.auction.toBase58())),
+    [scopedCampaignLots],
+  )
+  const auctionIsInScope = (auction: PublicKey) => !campaignScopeAddress || scopedAuctionKeys.has(auction.toBase58())
   const lotByAuction = useMemo(
     () => new Map((data?.campaignLots ?? []).map((lot) => [lot.auction.toBase58(), lot])),
     [data?.campaignLots],
@@ -279,6 +366,10 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       queryClient.invalidateQueries({ queryKey: ['claimspot-campaign-copy'] }),
       queryClient.invalidateQueries({ queryKey: ['claimspot-auctions'] }),
     ])
+  }
+
+  function updatePublishProof(id: string, patch: Partial<PublishProof>) {
+    setPublishProofs((current) => current.map((proof) => (proof.id === id ? { ...proof, ...patch } : proof)))
   }
 
   function updateLot(index: number, patch: Partial<LotDraft>) {
@@ -352,6 +443,8 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
     setModerator(draft.moderator === walletAddress ? '' : draft.moderator)
     setDurationValue(duration.value)
     setDurationUnit(duration.unit)
+    setDisplayDurationDays(copy.surface?.displayDurationDays ?? 7)
+    setPlacementStartWithinDays(copy.surface?.placementStartWithinDays ?? 3)
     setLayoutId(draft.layoutId)
     setLots(
       draft.plannedLots.map((lot, index) => ({
@@ -398,6 +491,8 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
     setModerator(campaign.moderator.equals(campaign.creator) ? '' : campaign.moderator.toBase58())
     setDurationValue(duration.value)
     setDurationUnit(duration.unit)
+    setDisplayDurationDays(7)
+    setPlacementStartWithinDays(3)
     setLayoutId(preset?.id ?? 'custom')
     setLots(
       geometry.map((spot, index) => {
@@ -431,6 +526,8 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
     setModerator('')
     setDurationValue('7')
     setDurationUnit('days')
+    setDisplayDurationDays(7)
+    setPlacementStartWithinDays(3)
     setLayoutId('classic-7')
     setLots(draftLots(LAPTOP_LAYOUT_PRESETS[0].spots))
     setCustomLotCount('7')
@@ -460,6 +557,30 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       return toast.error('Choose a whole-number duration between 1 minute and 30 days')
     }
 
+    setPublishProofs([
+      {
+        id: 'campaign',
+        label: 'Create campaign account',
+        detail: 'Creates the campaign record on Solana devnet.',
+        status: 'queued',
+      },
+      ...lots.map((lot, index) => ({
+        id: `lot-${index}`,
+        label: `Lot ${index + 1} · ${lot.name.trim()}`,
+        detail: 'Creates the auction, delegates its live state to MagicBlock, and registers the placement.',
+        status: 'queued' as const,
+      })),
+      {
+        id: 'publish',
+        label: 'Publish campaign',
+        detail: 'Makes the completed campaign publicly discoverable.',
+        status: 'queued',
+      },
+    ])
+    setPublishedCampaignKey(null)
+    setPublishError(null)
+    setPublishDialogOpen(true)
+
     try {
       setPending('builder')
       const recommendedSol = 0.03 + lots.length * 0.02
@@ -470,25 +591,27 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
         model: 'MacBook Pro',
         finish: 'Silver',
         fulfillmentMode: 'sticker' as const,
+        displayDurationDays,
+        placementStartWithinDays,
         source: 'template' as const,
       }
       const committedDetails = campaignDetailsCommitment(details, surface)
       const moderatorKey = moderator.trim() ? new PublicKey(moderator.trim()) : program.wallet.publicKey
 
-      // Run balance check, hashing, and chain refetch ALL in parallel
-      // so the wallet popup appears as fast as possible.
-      const [balanceLamports, titleHash, detailsHash, latestQuery] = await Promise.all([
+      // Only prepare data required by this transaction. Draft state was already
+      // reconciled by the lightweight Studio query; a full protocol refetch here
+      // delayed the wallet popup behind every auction and escrow read.
+      const [balanceLamports, titleHash, detailsHash] = await Promise.all([
         program.fetchSolBalance(),
         hashText(title.trim()),
         hashText(committedDetails),
-        chainQuery.refetch(),
       ])
       if (balanceLamports < recommendedSol * 1_000_000_000) {
         throw new Error(
           `Creator wallet needs about ${recommendedSol.toFixed(2)} devnet SOL for ${lots.length} lots. Use the devnet SOL button, then resume.`,
         )
       }
-      const latestData = latestQuery.data ?? data
+      const latestData = data
       const resumableCampaign = (latestData?.campaigns ?? [])
         .filter(
           (campaign) =>
@@ -507,12 +630,39 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       }
 
       const created = resumableCampaign
-        ? { campaign: resumableCampaign.publicKey, campaignId: resumableCampaign.campaignId }
+        ? { campaign: resumableCampaign.publicKey, campaignId: resumableCampaign.campaignId, signature: null }
         : await (async () => {
             setBuilderStep('Creating campaign account')
-            return program.createCampaign(title.trim(), committedDetails, moderatorKey)
+            updatePublishProof('campaign', {
+              status: 'signing',
+              detail: 'Approve the campaign account transaction in your wallet.',
+            })
+            const result = await program.createCampaign(
+              title.trim(),
+              committedDetails,
+              moderatorKey,
+              (status, detail, signature) => {
+                setBuilderStep(detail)
+                updatePublishProof('campaign', { status, detail, signature })
+              },
+            )
+            updatePublishProof('campaign', {
+              status: 'confirmed',
+              detail: 'Campaign account confirmed on Solana devnet.',
+              signature: result.signature,
+              account: result.campaign.toBase58(),
+            })
+            return result
           })()
-      if (resumableCampaign) setBuilderStep(`Resuming draft ${shortAddress(created.campaign.toBase58())}`)
+      setPublishedCampaignKey(created.campaign.toBase58())
+      if (resumableCampaign) {
+        setBuilderStep(`Resuming draft ${shortAddress(created.campaign.toBase58())}`)
+        updatePublishProof('campaign', {
+          status: 'confirmed',
+          detail: 'Existing campaign draft recovered from Solana devnet.',
+          account: created.campaign.toBase58(),
+        })
+      }
 
       const createdLots: CampaignMetadata['lots'] = []
       const registeredLots = new Map(
@@ -538,6 +688,11 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
             height: lots[index].geometry.height,
             dimensions: lots[index].geometry.dimensions,
           },
+        })
+        updatePublishProof(`lot-${index}`, {
+          status: 'confirmed',
+          detail: 'Previously confirmed lot recovered from the saved draft.',
+          account: registered.auction.toBase58(),
         })
       }
 
@@ -582,10 +737,23 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
             increment: toUsdcAtoms(Number(lot.increment)),
             durationSeconds,
           })),
-          setBuilderStep,
+          (progress) => {
+            setBuilderStep(progress.message)
+            updatePublishProof(`lot-${progress.lotNumber - 1}`, {
+              status: progress.phase,
+              detail:
+                progress.phase === 'signing'
+                  ? 'Approve this auction batch in your wallet.'
+                  : progress.phase === 'confirming'
+                    ? 'Wallet signed. Waiting for Solana confirmation.'
+                    : 'Auction created, live state delegated to MagicBlock, and placement registered.',
+              signature: progress.signature,
+            })
+          },
         )
         batched.auctions.forEach((auction, offset) => {
           const lot = pendingLots[offset]
+          updatePublishProof(`lot-${completedCount + offset}`, { account: auction.toBase58() })
           createdLots.push({
             auction: auction.toBase58(),
             name: lot.name.trim(),
@@ -614,7 +782,17 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
         draft,
       })
       setBuilderStep('Publishing campaign')
-      await program.publishCampaign(created.campaign)
+      updatePublishProof('publish', {
+        status: 'signing',
+        detail: 'Approve the final campaign publication transaction in your wallet.',
+      })
+      const publishSignature = await program.publishCampaign(created.campaign)
+      updatePublishProof('publish', {
+        status: 'confirmed',
+        detail: 'Campaign published and publicly available on Solana devnet.',
+        signature: publishSignature,
+        account: created.campaign.toBase58(),
+      })
       await saveCampaignMetadata({ campaign: created.campaign, titleHash, detailsHash, surface, createdLots })
 
       toast.success('Campaign is live on devnet', {
@@ -628,6 +806,8 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       setSelectedLot(0)
       setDurationValue('7')
       setDurationUnit('days')
+      setDisplayDurationDays(7)
+      setPlacementStartWithinDays(3)
       setBuilderStep('Published')
       setResumeCampaignKey(null)
       setLegacyRecovery(false)
@@ -635,6 +815,20 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       await refresh()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Campaign transaction failed'
+      setPublishError(message)
+      setPublishProofs((current) => {
+        let markedFailure = false
+        const activeMarked = current.map((proof) => {
+          if (proof.status !== 'preparing' && proof.status !== 'signing' && proof.status !== 'confirming') return proof
+          markedFailure = true
+          return { ...proof, status: 'failed' as const, detail: message }
+        })
+        if (markedFailure) return activeMarked
+        const queuedIndex = activeMarked.findIndex((proof) => proof.status === 'queued')
+        return activeMarked.map((proof, index) =>
+          index === queuedIndex ? { ...proof, status: 'failed' as const, detail: message } : proof,
+        )
+      })
       const isBlockhash = message.toLowerCase().includes('blockhash') || message.toLowerCase().includes('block height')
       toast.error(
         isBlockhash
@@ -676,12 +870,20 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
     await run('sol-airdrop', () => program.requestDevnetSol(1), '1 devnet SOL added to the creator wallet')
   }
 
-  async function submitArtwork(auction: ChainAuction, file: File) {
+  async function submitLegacyLogo(auction: ChainAuction, file: File) {
     const uploaded = await uploadImage(file)
     await run(
       `creative-${auction.publicKey}`,
       () => program.submitCreative(auction.publicKey, hashHexToBytes(uploaded.hash)),
-      'Artwork hash submitted on devnet',
+      'Winner logo recorded on Solana devnet',
+    )
+  }
+
+  async function confirmSavedLogo(auction: ChainAuction, logoHash: string) {
+    await run(
+      `creative-${auction.publicKey}`,
+      () => program.submitCreative(auction.publicKey, hashHexToBytes(logoHash)),
+      'Winner logo recorded on Solana devnet',
     )
   }
 
@@ -695,33 +897,61 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
   }
 
   const myCampaigns = (data?.campaigns ?? []).filter((campaign) => campaign.creator.toBase58() === walletAddress)
+  const visibleCampaigns = campaignScopeAddress
+    ? myCampaigns.filter((campaign) => campaign.publicKey.toBase58() === campaignScopeAddress)
+    : myCampaigns
+  const scopedCampaignName = scopedCampaign
+    ? (copyByCampaign.get(scopedCampaign.publicKey.toBase58())?.title ??
+      shortAddress(scopedCampaign.publicKey.toBase58()))
+    : null
+  const scopedLotCount = scopedCampaign?.lotCount ?? scopedCampaignLots.length
   const draftCampaigns = myCampaigns
     .filter((campaign) => campaign.status === 'draft')
     .sort((left, right) => Number(right.createdAt - left.createdAt))
-  const eligibleArtwork = (data?.auctions ?? []).filter(
+  const legacyLogoRecovery = (data?.auctions ?? []).filter(
     (auction) =>
-      auction.highestBidder.toBase58() === walletAddress ||
-      (auction.status === 'settled' && auction.winner.toBase58() === walletAddress),
+      auctionIsInScope(auction.publicKey) &&
+      auction.status === 'settled' &&
+      auction.winner.toBase58() === walletAddress &&
+      !(data?.creatives ?? []).some(
+        (creative) => creative.auction.equals(auction.publicKey) && creative.submitter.equals(auction.winner),
+      ),
   )
   const pendingModeration = (data?.creatives ?? []).filter((creative) => {
+    if (!auctionIsInScope(creative.auction)) return false
     const lot = lotByAuction.get(creative.auction.toBase58())
     const campaign = lot ? campaignByKey.get(lot.campaign.toBase58()) : null
-    return creative.status === 'pending' && campaign?.moderator.toBase58() === walletAddress
+    const auction = (data?.auctions ?? []).find((row) => row.publicKey.equals(creative.auction))
+    return (
+      creative.status === 'pending' &&
+      campaign?.moderator.toBase58() === walletAddress &&
+      auction?.status === 'settled' &&
+      auction.winner.equals(creative.submitter)
+    )
   })
   const creatorProofs = (data?.auctions ?? []).filter(
     (auction) =>
+      auctionIsInScope(auction.publicKey) &&
       auction.creator.toBase58() === walletAddress &&
       auction.status === 'settled' &&
       !proofByAuction.has(auction.publicKey.toBase58()) &&
-      !auction.winner.equals(PublicKey.default),
+      !auction.winner.equals(PublicKey.default) &&
+      (data?.creatives ?? []).some(
+        (creative) =>
+          creative.auction.equals(auction.publicKey) &&
+          creative.submitter.equals(auction.winner) &&
+          creative.status === 'approved',
+      ),
   )
   const winnerProofs = (data?.proofs ?? []).filter((proof) => {
+    if (!auctionIsInScope(proof.auction)) return false
     const auction = data?.auctions.find((row) => row.publicKey.equals(proof.auction))
     return proof.status === 'pending' && auction?.winner.toBase58() === walletAddress
   })
   const settlementAuctions = (data?.auctions ?? []).filter(
     (auction) =>
-      auction.creator.toBase58() === walletAddress || Boolean(myEscrowByAuction.get(auction.publicKey.toBase58())),
+      auctionIsInScope(auction.publicKey) &&
+      (auction.creator.toBase58() === walletAddress || Boolean(myEscrowByAuction.get(auction.publicKey.toBase58()))),
   )
   const creatorFinalizeQueue = settlementAuctions
     .filter(
@@ -743,6 +973,13 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
       !auction.winner.equals(PublicKey.default) &&
       !receiptByAuction.has(auction.publicKey.toBase58()) &&
       !releasedAuctionKeys.has(auction.publicKey.toBase58()),
+  )
+  const returnToSolanaCount = creatorFinalizeQueue.filter((auction) => !auction.closed).length
+  const waitingForReturnCount = creatorFinalizeQueue.filter((auction) => auction.closed && auction.delegated).length
+  const finalizationReadyCount = creatorFinalizeQueue.filter((auction) => auction.closed && !auction.delegated).length
+  const remainingFinalizationApprovals = creatorFinalizeQueue.reduce(
+    (count, auction) => count + (auction.closed ? 1 : 2),
+    0,
   )
 
   function auctionNames(auction: ChainAuction) {
@@ -780,6 +1017,8 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
         : wizardStep === 2
           ? validLots
           : true
+  const confirmedPublishProofs = publishProofs.filter((proof) => proof.status === 'confirmed').length
+  const publishComplete = publishProofs.length > 0 && confirmedPublishProofs === publishProofs.length
 
   return (
     <div className="min-h-screen bg-[#f4f4ef] px-4 py-12 text-black sm:px-6 lg:px-8">
@@ -790,12 +1029,18 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
               <Radio className="size-4" /> Devnet studio
             </div>
             <h1 className="mt-4 max-w-3xl text-[clamp(2.75rem,5vw,5rem)] font-black leading-[0.94] tracking-[-0.055em]">
-              {mode === 'create' ? 'Create your auction.' : 'Manage your auctions.'}
+              {mode === 'create'
+                ? 'Create your auction.'
+                : scopedCampaignName
+                  ? `Finish ${scopedCampaignName}.`
+                  : 'Manage your auctions.'}
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-neutral-600 sm:text-lg">
               {mode === 'create'
                 ? 'One clear step at a time: map the spots, set the promise, price the inventory, and publish.'
-                : 'Review artwork, prove delivery, close auctions, and complete settlement from one operational workspace.'}
+                : scopedCampaignName
+                  ? `${scopedLotCount} spots in this campaign. Only its settlement and delivery actions are shown here.`
+                  : 'Review winner logos, prove delivery, close auctions, and complete settlement from one operational workspace.'}
             </p>
             <div className="mt-6 flex min-h-11 flex-wrap items-center gap-6" aria-label="Solana and MagicBlock">
               <a
@@ -841,6 +1086,11 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                 </span>
               </Button>
             )}
+            {mode === 'operations' && campaignScopeAddress && (
+              <Button asChild variant="outline" className="min-h-11 border-black/15 bg-white px-4 shadow-sm">
+                <Link href="/manage">All campaigns</Link>
+              </Button>
+            )}
             {!walletAddress && <WalletButton />}
           </div>
         </div>
@@ -848,6 +1098,141 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
         <div className="mt-8 grid gap-8">
           {mode === 'create' && (
             <>
+              <Dialog open={publishDialogOpen} onOpenChange={setPublishDialogOpen}>
+                <DialogContent className="top-[48%] max-h-[88vh] gap-0 overflow-hidden border-black/15 bg-white p-0 sm:top-[44%] sm:max-w-2xl">
+                  <DialogHeader className="border-b border-black/10 p-5 pr-14 text-left sm:p-6 sm:pr-16">
+                    <p className="font-mono text-xs font-black uppercase tracking-[0.12em] text-neutral-500">
+                      On-chain publication
+                    </p>
+                    <DialogTitle className="text-2xl font-black tracking-[-0.04em]">
+                      {publishComplete
+                        ? 'Your campaign is live.'
+                        : publishError
+                          ? 'Publishing paused.'
+                          : 'Creating your campaign…'}
+                    </DialogTitle>
+                    <DialogDescription className="text-sm leading-6 text-neutral-600">
+                      {publishComplete
+                        ? 'Every required transaction is confirmed. Open any proof below or continue to the live auction.'
+                        : publishError
+                          ? 'Confirmed transactions are safe on devnet. Close this window, then use Resume & publish to continue.'
+                          : 'Approve each wallet request when it appears. This window tracks every Solana and MagicBlock step.'}
+                    </DialogDescription>
+
+                    <div className="pt-2">
+                      <div className="flex items-center justify-between gap-3 text-xs font-bold text-neutral-600">
+                        <span aria-live="polite">{builderStep}</span>
+                        <span className="font-mono shrink-0">
+                          {confirmedPublishProofs}/{publishProofs.length} confirmed
+                        </span>
+                      </div>
+                      <div
+                        className="mt-2 h-2 overflow-hidden rounded-full bg-neutral-200"
+                        role="progressbar"
+                        aria-label="Campaign publication progress"
+                        aria-valuemin={0}
+                        aria-valuemax={publishProofs.length || 1}
+                        aria-valuenow={confirmedPublishProofs}
+                      >
+                        <div
+                          className="h-full rounded-full bg-black transition-[width] duration-300 motion-reduce:transition-none"
+                          style={{
+                            width: `${publishProofs.length ? (confirmedPublishProofs / publishProofs.length) * 100 : 0}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </DialogHeader>
+
+                  <div className="max-h-[48vh] overflow-y-auto p-4 sm:p-5">
+                    <ol className="space-y-2" aria-label="Publication transactions">
+                      {publishProofs.map((proof, index) => {
+                        const active =
+                          proof.status === 'preparing' || proof.status === 'signing' || proof.status === 'confirming'
+                        const proofHref = proof.signature
+                          ? `https://explorer.solana.com/tx/${proof.signature}?cluster=devnet`
+                          : proof.account
+                            ? `https://explorer.solana.com/address/${proof.account}?cluster=devnet`
+                            : null
+                        return (
+                          <li
+                            key={proof.id}
+                            className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-xl border p-3 ${
+                              proof.status === 'failed'
+                                ? 'border-red-200 bg-red-50'
+                                : active
+                                  ? 'border-black/30 bg-neutral-50'
+                                  : 'border-black/10 bg-white'
+                            }`}
+                          >
+                            <span
+                              className={`grid size-9 shrink-0 place-items-center rounded-full text-xs font-black ${
+                                proof.status === 'confirmed'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : proof.status === 'failed'
+                                    ? 'bg-red-100 text-red-700'
+                                    : active
+                                      ? 'bg-black text-white'
+                                      : 'bg-neutral-100 text-neutral-500'
+                              }`}
+                              aria-hidden="true"
+                            >
+                              {proof.status === 'confirmed' ? (
+                                <Check className="size-4" />
+                              ) : proof.status === 'failed' ? (
+                                <AlertCircle className="size-4" />
+                              ) : active ? (
+                                <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />
+                              ) : (
+                                index + 1
+                              )}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-bold">{proof.label}</p>
+                              <p className="mt-0.5 text-xs leading-5 text-neutral-600">{proof.detail}</p>
+                            </div>
+                            {proofHref ? (
+                              <a
+                                href={proofHref}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex min-h-10 items-center gap-1.5 rounded-md px-2 text-xs font-bold underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black/30"
+                                aria-label={`Open proof for ${proof.label} in Solana Explorer`}
+                              >
+                                Proof <ExternalLink className="size-3.5" aria-hidden="true" />
+                              </a>
+                            ) : (
+                              <span className="font-mono text-[10px] font-black uppercase tracking-wide text-neutral-400">
+                                {proof.status === 'queued'
+                                  ? 'Queued'
+                                  : proof.status === 'signing'
+                                    ? 'Sign'
+                                    : proof.status === 'confirming'
+                                      ? 'Confirming'
+                                      : 'Stopped'}
+                              </span>
+                            )}
+                          </li>
+                        )
+                      })}
+                    </ol>
+                  </div>
+
+                  <DialogFooter className="border-t border-black/10 p-4 sm:p-5">
+                    <Button type="button" variant="outline" onClick={() => setPublishDialogOpen(false)}>
+                      Close
+                    </Button>
+                    {publishComplete && publishedCampaignKey ? (
+                      <Button asChild>
+                        <Link href={`/campaign/${publishedCampaignKey}`}>
+                          View live auction <ChevronRight className="size-4" aria-hidden="true" />
+                        </Link>
+                      </Button>
+                    ) : null}
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
               {draftCampaigns.length > 0 && (
                 <Dialog open={draftManagerOpen} onOpenChange={setDraftManagerOpen}>
                   <DialogContent className="max-h-[85vh] gap-0 overflow-hidden border-black/15 bg-white p-0 sm:max-w-4xl">
@@ -1096,7 +1481,7 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                     <p className="text-sm text-neutral-600">
                       Larger placements start higher. You can edit every reserve and increment below.
                     </p>
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                       {LAPTOP_LAYOUT_PRESETS.map((preset) => {
                         const active = layoutId === preset.id
                         return (
@@ -1144,6 +1529,60 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                           </button>
                         )
                       })}
+                      <button
+                        type="button"
+                        aria-pressed={layoutId === 'custom'}
+                        disabled={!customLotCount || customPreviewCount < 1 || customPreviewCount > MAX_LOTS}
+                        onClick={() => resizeLots(customPreviewCount)}
+                        className={`rounded-2xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-black/20 disabled:cursor-not-allowed disabled:opacity-45 ${
+                          layoutId === 'custom'
+                            ? 'border-black bg-black text-white'
+                            : 'border-black/15 bg-[#fafaf7] hover:border-black/40'
+                        }`}
+                      >
+                        <span
+                          className={`relative block aspect-[1.52/1] overflow-hidden rounded-lg border ${
+                            layoutId === 'custom' ? 'border-white/20 bg-white/10' : 'border-black/10 bg-neutral-200/70'
+                          }`}
+                        >
+                          {customPreviewSpots.map((spot) => (
+                            <span
+                              key={spot.id}
+                              className={`absolute rounded-[2px] border ${
+                                layoutId === 'custom' ? 'border-white/55 bg-white/10' : 'border-black/30 bg-white/40'
+                              }`}
+                              style={{
+                                left: `${spot.x}%`,
+                                top: `${spot.y}%`,
+                                width: `${spot.width}%`,
+                                height: `${spot.height}%`,
+                              }}
+                            />
+                          ))}
+                          <span
+                            className={`absolute left-1/2 top-1/2 size-[16%] -translate-x-1/2 -translate-y-1/2 rounded-full border ${
+                              layoutId === 'custom' ? 'border-white/25' : 'border-black/15'
+                            }`}
+                          />
+                        </span>
+                        <span className="mt-3 flex items-center justify-between gap-2">
+                          <span className="font-black">Custom layout</span>
+                          <span
+                            className={`text-xs font-black tabular-nums ${
+                              layoutId === 'custom' ? 'text-white/70' : 'text-neutral-500'
+                            }`}
+                          >
+                            {customPreviewSpots.length} spots
+                          </span>
+                        </span>
+                        <span
+                          className={`mt-1 block text-xs ${
+                            layoutId === 'custom' ? 'text-white/70' : 'text-neutral-500'
+                          }`}
+                        >
+                          Balanced around the mark
+                        </span>
+                      </button>
                     </div>
                     <div className="flex flex-wrap items-end gap-2">
                       <label
@@ -1267,64 +1706,108 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                         placeholder="Logo displayed on my MacBook lid for the selected duration, with dated photo proof."
                       />
                     </label>
-                    <fieldset className={`grid gap-3 md:col-span-2 ${wizardStep === 1 ? '' : 'hidden'}`}>
-                      <legend className="text-sm font-bold">Auction duration</legend>
-                      <div className="flex max-w-lg flex-col gap-2 sm:flex-row">
-                        <label className="sr-only" htmlFor="duration-value">
-                          Duration value
-                        </label>
-                        <Input
-                          id="duration-value"
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          autoComplete="off"
-                          value={durationValue}
-                          onChange={(event) => setDurationValue(event.target.value.replace(/\D/g, ''))}
-                          className="sm:max-w-40"
-                        />
-                        <label className="sr-only" htmlFor="duration-unit">
-                          Duration unit
-                        </label>
-                        <select
-                          id="duration-unit"
-                          value={durationUnit}
-                          onChange={(event) => setDurationUnit(event.target.value as DurationUnit)}
-                          className="min-h-10 rounded-md border border-input bg-background px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-                        >
-                          <option value="minutes">Minutes</option>
-                          <option value="hours">Hours</option>
-                          <option value="days">Days</option>
-                        </select>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {DURATION_PRESETS.map((preset) => {
-                          const active = durationValue === preset.value && durationUnit === preset.unit
-                          return (
-                            <button
-                              key={preset.label}
-                              type="button"
-                              onClick={() => {
-                                setDurationValue(preset.value)
-                                setDurationUnit(preset.unit)
-                              }}
-                              className={`min-h-10 rounded-md border px-3 text-xs font-bold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
-                                active
-                                  ? 'border-foreground bg-foreground text-background'
-                                  : 'border-input bg-background text-ink-muted hover:text-foreground'
-                              }`}
+                    <fieldset className={`md:col-span-2 ${wizardStep === 1 ? '' : 'hidden'}`}>
+                      <legend className="text-sm font-bold">Campaign schedule</legend>
+                      <div className="mt-4 grid max-w-5xl items-start gap-x-6 gap-y-4 sm:grid-cols-[1fr_1.5fr_1fr]">
+                        <div className="space-y-2">
+                          <label className="block text-sm font-semibold" htmlFor="display-duration">
+                            Placement duration
+                          </label>
+                          <select
+                            id="display-duration"
+                            value={displayDurationDays}
+                            onChange={(event) => setDisplayDurationDays(Number(event.target.value))}
+                            className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          >
+                            {DISPLAY_DURATION_OPTIONS.map((days) => (
+                              <option key={days} value={days}>
+                                {days} {days === 1 ? 'day' : 'days'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <span id="auction-duration-label" className="block text-sm font-semibold">
+                            Auction duration
+                          </span>
+                          <div
+                            className="grid h-11 grid-cols-[minmax(0,1fr)_auto] gap-2"
+                            role="group"
+                            aria-labelledby="auction-duration-label"
+                          >
+                            <label className="sr-only" htmlFor="duration-value">
+                              Duration value
+                            </label>
+                            <Input
+                              id="duration-value"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              autoComplete="off"
+                              value={durationValue}
+                              onChange={(event) => setDurationValue(event.target.value.replace(/\D/g, ''))}
+                              className="h-11"
+                            />
+                            <label className="sr-only" htmlFor="duration-unit">
+                              Duration unit
+                            </label>
+                            <select
+                              id="duration-unit"
+                              value={durationUnit}
+                              onChange={(event) => setDurationUnit(event.target.value as DurationUnit)}
+                              className="h-11 rounded-md border border-input bg-background px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                             >
-                              {preset.label}
-                            </button>
-                          )
-                        })}
+                              <option value="minutes">Minutes</option>
+                              <option value="hours">Hours</option>
+                              <option value="days">Days</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="block text-sm font-semibold" htmlFor="placement-start">
+                            Placement starts within
+                          </label>
+                          <select
+                            id="placement-start"
+                            value={placementStartWithinDays}
+                            onChange={(event) => setPlacementStartWithinDays(Number(event.target.value))}
+                            className="h-11 w-full rounded-md border border-input bg-background px-3 text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          >
+                            {PLACEMENT_START_OPTIONS.map((days) => (
+                              <option key={days} value={days}>
+                                {days} {days === 1 ? 'day' : 'days'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
-                      <p className="text-xs text-ink-muted">
-                        Custom from 1 minute to 30 days
-                        {Number(durationValue) > 0 &&
-                        Number(durationValue) * DURATION_UNITS[durationUnit] <= MAX_DURATION_SECONDS
-                          ? ` · Ends ${readableDuration(Number(durationValue) * DURATION_UNITS[durationUnit])} after publishing`
-                          : ''}
+                      <div className="mt-3 grid max-w-5xl gap-x-6 sm:grid-cols-[1fr_1.5fr_1fr]">
+                        <div className="grid grid-cols-4 gap-2 sm:col-start-2">
+                          {DURATION_PRESETS.map((preset) => {
+                            const active = durationValue === preset.value && durationUnit === preset.unit
+                            return (
+                              <button
+                                key={preset.label}
+                                type="button"
+                                onClick={() => {
+                                  setDurationValue(preset.value)
+                                  setDurationUnit(preset.unit)
+                                }}
+                                className={`min-h-10 rounded-md border px-2 text-xs font-bold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
+                                  active
+                                    ? 'border-foreground bg-foreground text-background'
+                                    : 'border-input bg-background text-ink-muted hover:text-foreground'
+                                }`}
+                              >
+                                {preset.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                      <p className="mt-3 text-xs text-ink-muted">
+                        Placement begins within {placementStartWithinDays}{' '}
+                        {placementStartWithinDays === 1 ? 'day' : 'days'} after the winner&apos;s logo is approved.
                       </p>
                     </fieldset>
                   </div>
@@ -1424,7 +1907,9 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                           Campaign
                         </p>
                         <p className="mt-2 font-black">{title || 'Untitled auction'}</p>
-                        <p className="mt-1 text-xs text-neutral-500">{readableDuration(durationSeconds)}</p>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          {readableDuration(durationSeconds)} bidding · {displayDurationDays}-day display
+                        </p>
                       </div>
                       <div>
                         <p className="font-mono text-[10px] font-black uppercase tracking-[0.12em] text-neutral-500">
@@ -1481,7 +1966,11 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
-                      {pending === 'builder' && <span className="text-sm text-neutral-500">{builderStep}</span>}
+                      {pending === 'builder' && (
+                        <Button type="button" variant="outline" onClick={() => setPublishDialogOpen(true)}>
+                          View progress
+                        </Button>
+                      )}
                       {wizardStep < BUILDER_STEPS.length - 1 ? (
                         <Button type="submit" disabled={!canContinue || pending === 'builder'}>
                           Continue <ChevronRight className="size-4" aria-hidden="true" />
@@ -1504,20 +1993,29 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
           {mode === 'operations' && (
             <>
               <div id="creator-actions" className="mb-8">
-                <Section eyebrow="Creator workflow" title="Your next auction actions">
+                <Section
+                  eyebrow={scopedCampaignName ? `${scopedLotCount} spots · campaign settlement` : 'Creator workflow'}
+                  title={scopedCampaignName ? `Finish ${scopedCampaignName}` : 'Your next auction actions'}
+                >
                   {!walletAddress ? (
                     <Empty>Connect the creator wallet to see the next required action.</Empty>
                   ) : chainQuery.isLoading ? (
                     <div className="flex items-center gap-3 text-sm font-bold text-neutral-600">
                       <LoaderCircle className="size-5 animate-spin" /> Checking ended auctions…
                     </div>
+                  ) : campaignScopeAddress && !scopedCampaign ? (
+                    <Empty>
+                      This campaign could not be found on devnet. <Link href="/manage">View all campaigns</Link>.
+                    </Empty>
                   ) : creatorFinalizeQueue.length === 0 && creatorDeliveryQueue.length === 0 ? (
                     <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
                       <Check className="mt-0.5 size-5 text-emerald-700" />
                       <div>
                         <p className="font-black text-emerald-950">Nothing needs your attention right now.</p>
                         <p className="mt-1 text-sm leading-6 text-emerald-800">
-                          Ended auctions and delivery steps will appear here automatically.
+                          {scopedCampaignName
+                            ? 'Every spot in this campaign is complete, or it has not ended yet.'
+                            : 'Ended auctions and delivery steps will appear here automatically.'}
                         </p>
                       </div>
                     </div>
@@ -1526,17 +2024,42 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                       {creatorFinalizeQueue.length > 0 && (
                         <div>
                           <div className="mb-5 flex flex-col gap-3 rounded-2xl bg-neutral-100 p-4 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="max-w-2xl text-sm leading-6 text-neutral-700">
-                              Each ended lot takes up to two transactions: return its live MagicBlock result to Solana,
-                              then lock the winner. Lots with bids are shown first.
-                            </p>
+                            <div className="max-w-2xl text-sm leading-6 text-neutral-700">
+                              {scopedCampaignName ? (
+                                <>
+                                  <p>
+                                    <span className="font-black">{scopedLotCount} spots in this campaign.</span> Each
+                                    spot is an independent on-chain auction: return its final MagicBlock state, then
+                                    either lock its winner or close it with no winner.
+                                  </p>
+                                  <p className="mt-1 text-xs text-neutral-500">
+                                    {returnToSolanaCount} ready to return · {waitingForReturnCount} returning ·{' '}
+                                    {finalizationReadyCount} ready for the Solana confirmation.
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p>
+                                    This is the combined inbox for every campaign owned by this wallet. Each ended lot
+                                    takes up to two transactions: return its live MagicBlock result to Solana, then lock
+                                    the winner.
+                                  </p>
+                                  <p className="mt-1 text-xs text-neutral-500">
+                                    Open one campaign from My auctions to work only on that campaign&apos;s spots.
+                                  </p>
+                                </>
+                              )}
+                            </div>
                             <span className="w-fit shrink-0 rounded-full bg-black px-3 py-1.5 text-xs font-black uppercase tracking-wide text-white">
-                              {creatorFinalizeQueue.length} pending
+                              {scopedCampaignName
+                                ? `${remainingFinalizationApprovals} approvals left`
+                                : `${creatorFinalizeQueue.length} across campaigns`}
                             </span>
                           </div>
                           <div className="grid gap-4">
                             {creatorFinalizeQueue.map((auction, index) => {
                               const { campaignName, lotName } = auctionNames(auction)
+                              const campaignLot = lotByAuction.get(auction.publicKey.toBase58())
                               const hasBid = auction.bidCount > 0n
                               const waitingForBaseLayer = auction.closed && auction.delegated
                               const readyToFinalize = auction.closed && !auction.delegated
@@ -1551,7 +2074,9 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                                   <div className="min-w-0">
                                     <div className="flex flex-wrap items-center gap-2">
                                       <span className="rounded-full bg-black px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white">
-                                        Priority {index + 1}
+                                        {scopedCampaignName
+                                          ? `Spot ${campaignLot ? campaignLot.lotIndex + 1 : index + 1} of ${scopedLotCount}`
+                                          : `Priority ${index + 1}`}
                                       </span>
                                       {hasBid ? (
                                         <span className="rounded-full bg-[#fff21c] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em]">
@@ -1668,22 +2193,24 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                               const creativeApproved = winnerCreative?.status === 'approved'
                               const proofAccepted = proof?.status === 'accepted'
                               const nextTitle = !winnerCreative
-                                ? 'Waiting for winner artwork'
+                                ? 'Waiting for winner logo confirmation'
                                 : !creativeApproved
                                   ? winnerCreative.status === 'rejected'
-                                    ? 'Winner must replace rejected artwork'
-                                    : 'Artwork needs moderator approval'
+                                    ? 'Winner logo was rejected'
+                                    : 'Logo needs moderator approval'
                                   : !proof
-                                    ? 'Place the artwork and upload proof'
+                                    ? 'Place the approved logo and upload photo proof'
                                     : !proofAccepted
                                       ? proof.status === 'disputed'
                                         ? 'Delivery proof was disputed'
                                         : 'Waiting for winner proof review'
                                       : 'Release your payment'
                               const nextDescription = !winnerCreative
-                                ? `Winner ${shortAddress(auction.winner.toBase58())} must submit the winning creative from their wallet.`
+                                ? `Winner ${shortAddress(auction.winner.toBase58())} must confirm their saved bid logo on Solana from their wallet.`
                                 : !creativeApproved
-                                  ? 'The submitted creative must be approved before physical placement begins.'
+                                  ? winnerCreative.status === 'rejected'
+                                    ? 'This deployed program cannot replace a rejected logo in the same lot. Do not place it or release payment; this lot needs a recovery path.'
+                                    : 'The saved logo must be approved before physical placement begins.'
                                   : !proof
                                     ? 'Complete the promised placement, then upload dated evidence for the winner.'
                                     : !proofAccepted
@@ -1710,7 +2237,7 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                                     </span>
                                   ) : !creativeApproved ? (
                                     <Button asChild variant="outline" className="shrink-0">
-                                      <a href="#moderator-actions">Review artwork</a>
+                                      <a href="#moderator-actions">Review logo</a>
                                     </Button>
                                   ) : !proof ? (
                                     <Button asChild className="shrink-0">
@@ -1733,16 +2260,19 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
               </div>
 
               <div className="grid gap-8 lg:grid-cols-2">
-                <Section eyebrow="02 · Real campaigns" title="Your on-chain drops">
+                <Section
+                  eyebrow="02 · Real campaigns"
+                  title={scopedCampaignName ? 'This campaign' : 'Your on-chain drops'}
+                >
                   {!walletAddress ? (
                     <Empty>Connect the creator wallet to filter its campaigns.</Empty>
                   ) : chainQuery.isLoading ? (
                     <LoaderCircle className="animate-spin" />
-                  ) : myCampaigns.length === 0 ? (
+                  ) : visibleCampaigns.length === 0 ? (
                     <Empty>No campaign account exists for this wallet yet.</Empty>
                   ) : (
                     <div className="grid gap-3">
-                      {myCampaigns.map((campaign) => {
+                      {visibleCampaigns.map((campaign) => {
                         const copy = copyByCampaign.get(campaign.publicKey.toBase58())
                         return (
                           <div key={campaign.publicKey.toBase58()} className="rounded-2xl border border-black/10 p-4">
@@ -1793,35 +2323,64 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                   )}
                 </Section>
 
-                <Section eyebrow="03 · Bidder artwork" title="Submit winning creative">
-                  {!walletAddress ? (
-                    <Empty>Connect the bidder wallet to see eligible lots.</Empty>
-                  ) : eligibleArtwork.length === 0 ? (
-                    <Empty>This wallet is not the current leader or settled winner of a lot.</Empty>
-                  ) : (
+                {legacyLogoRecovery.length > 0 && (
+                  <Section eyebrow="Legacy recovery" title="Record an earlier bid logo">
+                    <p className="mb-4 text-sm text-neutral-600">
+                      New bids record their logo automatically. These older winning bids were placed before that flow
+                      existed and need one recovery transaction.
+                    </p>
                     <div className="grid gap-4">
-                      {eligibleArtwork.map((auction) => {
-                        const existing = data?.creatives.find(
-                          (creative) =>
-                            creative.auction.equals(auction.publicKey) &&
-                            creative.submitter.toBase58() === walletAddress,
-                        )
+                      {legacyLogoRecovery.map((auction) => {
                         return (
                           <div key={auction.publicKey.toBase58()} className="rounded-2xl border border-black/10 p-4">
                             <p className="font-black">Auction #{auction.auctionId.toString()}</p>
                             <p className="mt-1 text-sm text-neutral-500">
                               {shortAddress(auction.publicKey.toBase58())}
                             </p>
-                            {existing ? (
-                              <p className="mt-4 inline-flex items-center gap-2 text-sm font-bold">
-                                <FileCheck2 className="size-4" /> Artwork {existing.status}
+                            {brandQuery.isPending ? (
+                              <p className="mt-4 flex items-center gap-2 text-sm text-neutral-600">
+                                <LoaderCircle className="size-4 animate-spin" /> Loading your saved bid logo…
                               </p>
+                            ) : brandQuery.isError ? (
+                              <Button variant="outline" onClick={() => brandQuery.refetch()} className="mt-4">
+                                Retry loading logo
+                              </Button>
+                            ) : savedBrand ? (
+                              <div className="mt-4 flex flex-wrap items-center gap-4">
+                                <Image
+                                  src={`/api/uploads/${savedBrand.logoHash}`}
+                                  alt={`${savedBrand.name} primary logo`}
+                                  width={72}
+                                  height={72}
+                                  unoptimized
+                                  className="size-18 rounded-lg border border-black/10 object-contain"
+                                />
+                                <div>
+                                  <p className="text-sm font-black">{savedBrand.name}</p>
+                                  <p className="mt-1 text-xs text-neutral-600">
+                                    This is the logo saved before bidding. No new image upload is needed.
+                                  </p>
+                                  <Button
+                                    className="mt-3"
+                                    disabled={Boolean(pending)}
+                                    onClick={() => confirmSavedLogo(auction, savedBrand.logoHash)}
+                                  >
+                                    {pending === `creative-${auction.publicKey}` && (
+                                      <LoaderCircle className="size-4 animate-spin" />
+                                    )}
+                                    Confirm this logo on Solana
+                                  </Button>
+                                </div>
+                              </div>
                             ) : (
                               <div className="mt-4">
+                                <p className="mb-3 text-xs text-neutral-600">
+                                  This older bid has no saved brand profile. Upload its primary logo once to continue.
+                                </p>
                                 <ImageTransaction
-                                  label="Upload & submit"
+                                  label="Upload primary logo"
                                   pending={pending === `creative-${auction.publicKey}`}
-                                  onSubmit={(file) => submitArtwork(auction, file)}
+                                  onSubmit={(file) => submitLegacyLogo(auction, file)}
                                 />
                               </div>
                             )}
@@ -1829,13 +2388,13 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                         )
                       })}
                     </div>
-                  )}
-                </Section>
+                  </Section>
+                )}
 
                 <div id="moderator-actions" className="scroll-mt-24">
-                  <Section eyebrow="04 · Moderator queue" title="Approve actual artwork">
+                  <Section eyebrow="04 · Moderator queue" title="Approve winner logo">
                     {pendingModeration.length === 0 ? (
-                      <Empty>No pending creative assigned to this moderator wallet.</Empty>
+                      <Empty>No winner logo is awaiting this moderator wallet.</Empty>
                     ) : (
                       <div className="grid gap-4">
                         {pendingModeration.map((creative) => {
@@ -1848,7 +2407,7 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                             >
                               <Image
                                 src={`/api/uploads/${hash}`}
-                                alt="Submitted sponsor artwork"
+                                alt="Winner brand logo awaiting review"
                                 width={112}
                                 height={112}
                                 unoptimized
@@ -1873,7 +2432,7 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                                             true,
                                             '',
                                           ),
-                                        'Artwork approved on devnet',
+                                        'Winner logo approved on devnet',
                                       )
                                     }
                                   >
@@ -1895,7 +2454,7 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                                             false,
                                             'Does not meet campaign requirements',
                                           ),
-                                        'Artwork rejected on devnet',
+                                        'Winner logo rejected on devnet',
                                       )
                                     }
                                   >
@@ -1914,7 +2473,7 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                 <div id="fulfillment-actions" className="scroll-mt-24">
                   <Section eyebrow="05 · Fulfillment" title="Prove the placement">
                     {creatorProofs.length === 0 ? (
-                      <Empty>No settled winning lot is waiting for creator proof.</Empty>
+                      <Empty>No approved winner logo is waiting for a placement photo.</Empty>
                     ) : (
                       <div className="grid gap-4">
                         {creatorProofs.map((auction) => (
@@ -1923,7 +2482,8 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
                               {formatUsdc(fromUsdcAtoms(auction.winningBid))} USDC secured for delivery
                             </p>
                             <p className="mt-1 text-sm text-neutral-500">
-                              Upload dated placement proof. Payment remains in the vault until the winner accepts it.
+                              Upload a dated photo of the placed logo. Payment remains in the vault until the winner
+                              accepts it.
                             </p>
                             <div className="mt-4">
                               <ImageTransaction
@@ -2012,7 +2572,10 @@ export function StudioFeature({ mode = 'create' }: { mode?: 'create' | 'operatio
               </div>
 
               <div id="settlement-records" className="mt-8">
-                <Section eyebrow="Settlement records" title="All lots and refunds">
+                <Section
+                  eyebrow="Settlement records"
+                  title={scopedCampaignName ? 'Campaign lots and refunds' : 'All lots and refunds'}
+                >
                   {settlementAuctions.length === 0 ? (
                     <Empty>No creator, leader or winner auctions were found for this wallet.</Empty>
                   ) : (
