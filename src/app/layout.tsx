@@ -18,9 +18,26 @@ const dmMono = DM_Mono({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'),
   title: 'Atrium.ads — The P2P auction marketplace for ad space',
   description:
     'The peer-to-peer auction marketplace for physical and digital placements. List your space; advertisers bid live or buy instantly.',
+  openGraph: {
+    title: 'Atrium.ads — The P2P auction marketplace for ad space',
+    description: 'Auction physical and digital sponsorship placements with live bidding and proof-backed settlement.',
+    images: [
+      {
+        url: '/assets/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'Atrium.ads sponsorship auction marketplace',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    images: ['/assets/og-image.png'],
+  },
 }
 
 const links: { label: string; path: string }[] = [

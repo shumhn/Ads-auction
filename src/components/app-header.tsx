@@ -21,7 +21,7 @@ export function AppHeader({ links = [] }: { links: { label: string; path: string
         <div className="flex min-w-0 items-center gap-8">
           <Link className="flex shrink-0 items-center gap-2.5 text-[15px] font-bold tracking-[-0.035em]" href="/">
             <Image
-              src="/atrium-mark-minimal.svg"
+              src="/assets/brand/atrium-mark-minimal.svg"
               alt="Atrium.ads logo"
               width={28}
               height={28}
