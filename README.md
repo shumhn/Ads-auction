@@ -1,8 +1,8 @@
-# Atrium.ads
+# Atrium.ad
 
 **Turn anything you own into a live sponsor board.**
 
-Atrium.ads is a peer-to-peer marketplace for auctioning measurable sponsorship rights: a sticker position on a creator's laptop or helmet, a stream overlay, a newsletter slot, a profile banner, or another physical/digital surface.
+Atrium.ad is a peer-to-peer marketplace for auctioning measurable sponsorship rights: a sticker position on a creator's laptop or helmet, a stream overlay, a newsletter slot, a profile banner, or another physical/digital surface.
 
 ## Current status
 
@@ -97,4 +97,4 @@ Deployment and bidder keypairs live under ignored `anchor/.keys/`. RPC credentia
 
 ## Why MagicBlock
 
-Atrium.ads follows the architecture proven in the local Atrium.ad project: permanent custody and settlement stay on Solana, frequently changing participant state is delegated for fast execution, and canonical results return to base before funds move. See [Architecture](docs/ARCHITECTURE.md) and [Roadmap](docs/ROADMAP.md).
+Atrium.ad uses a split Solana and MagicBlock execution model: permanent custody and settlement stay on Solana, frequently changing participant state is delegated for fast execution, and canonical results return to base before funds move. See [Architecture](docs/ARCHITECTURE.md) and [Roadmap](docs/ROADMAP.md).
