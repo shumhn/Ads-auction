@@ -97,4 +97,4 @@ Deployment and bidder keypairs live under ignored `anchor/.keys/`. RPC credentia
 
 ## Why MagicBlock
 
-Atrium.ad uses a split Solana and MagicBlock execution model: permanent custody and settlement stay on Solana, frequently changing participant state is delegated for fast execution, and canonical results return to base before funds move. See [Architecture](docs/ARCHITECTURE.md) and [Roadmap](docs/ROADMAP.md).
+Atrium.ad uses MagicBlock's Ephemeral Rollup for fast, real-time bidding while keeping durable custody and settlement on Solana. Live auction and bidder state are delegated for low-latency execution, then the final result is committed back to Solana before payouts and refunds are processed. See [Architecture](docs/ARCHITECTURE.md) and [Roadmap](docs/ROADMAP.md).
